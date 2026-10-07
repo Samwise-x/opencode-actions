@@ -72,7 +72,7 @@ runs:
     - name: Install pinned OpenCode
       shell: bash
       run: >-
-        "$GITHUB_ACTION_PATH/scripts/install-opencode.sh"
+        bash "$GITHUB_ACTION_PATH/scripts/install-opencode.sh"
         "${{ inputs.opencode-version }}"
         "${{ inputs.opencode-linux-x64-sha256 }}"
 
@@ -85,9 +85,9 @@ runs:
         LEASE_SECONDS: ${{ inputs.lease-seconds }}
       run: |
         set -euo pipefail
-        "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '"$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        lease_json="$("$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "${{ steps.meta.outputs.base_sha }}" "${{ steps.meta.outputs.attempt_id }}")"
+        bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        lease_json="$(bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "${{ steps.meta.outputs.base_sha }}" "${{ steps.meta.outputs.attempt_id }}")"
         echo "$lease_json" | jq .
         acquired="$(jq -r .acquired <<<"$lease_json")"
         echo "acquired=$acquired" >> "$GITHUB_OUTPUT"
@@ -117,7 +117,7 @@ runs:
         VALIDATION_COMMAND: ${{ inputs.validation-command }}
         ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
         EVIDENCE_DIR: .opencode-evidence
-      run: "$GITHUB_ACTION_PATH/scripts/worker.sh"
+      run: bash "$GITHUB_ACTION_PATH/scripts/worker.sh"
 
     - id: publish
       name: Publish validated candidate
@@ -130,9 +130,9 @@ runs:
         EVIDENCE_DIR: .opencode-evidence
       run: |
         set -euo pipefail
-        "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '"$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        candidate="$("$GITHUB_ACTION_PATH/scripts/publish.sh")"
+        bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        candidate="$(bash "$GITHUB_ACTION_PATH/scripts/publish.sh")"
         echo "candidate_sha=$candidate" >> "$GITHUB_OUTPUT"
 
         if [[ "$candidate" == "${BASE_SHA}" ]]; then
@@ -166,9 +166,9 @@ runs:
         TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
       run: |
         set -euo pipefail
-        "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '"$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           validated           "${{ steps.publish.outputs.candidate_sha }}"           "artifact:opencode-evidence-${{ steps.meta.outputs.attempt_id }}"
+        bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           validated           "${{ steps.publish.outputs.candidate_sha }}"           "artifact:opencode-evidence-${{ steps.meta.outputs.attempt_id }}"
 
     - name: Release failed trajectory lease
       if: ${{ failure() && steps.lease.outputs.acquired == 'true' && steps.lease.outputs.trajectory_sha != '' }}
@@ -178,6 +178,6 @@ runs:
         TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
       run: |
         set -euo pipefail
-        "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '"$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           failed || true
+        bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           failed || true
