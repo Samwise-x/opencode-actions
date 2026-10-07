@@ -1,0 +1,46 @@
+name: OpenCode Candidate Validation
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: candidate-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+jobs:
+  deterministic:
+    if: startsWith(github.head_ref, 'opencode/attempt/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
+      - name: Nix + Dagger canonical validation
+        run: nix develop --command dagger call validate
+
+  security:
+    if: startsWith(github.head_ref, 'opencode/attempt/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Zizmor
+        uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
+        with:
+          advanced-security: false
+          annotations: true
+          online-audits: false
+          persona: pedantic
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@c03d123cb480c08c69b054af418ea5e69fe6e57e
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: "1"
+          ignore-unfixed: false
+          severity: CRITICAL,HIGH
