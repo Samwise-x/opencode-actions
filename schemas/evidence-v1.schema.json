@@ -1,79 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Samwise-x/opencode-actions/schemas/evidence-v1.schema.json",
-  "title": "OpenCode Actions Evidence Manifest v1",
+  "title": "OpenCode Actions Evidence v1",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema",
-    "attempt_id",
-    "trajectory_epoch",
-    "repository",
-    "workflow",
-    "git",
-    "execution",
-    "artifacts",
-    "created_at"
-  ],
+  "additionalProperties": true,
+  "required": ["schema", "attempt_id", "base_sha", "status", "opencode_exit", "started_at", "ended_at"],
   "properties": {
-    "schema": { "const": "opencode-actions/evidence/v1" },
-    "attempt_id": { "type": "string", "minLength": 8 },
-    "trajectory_epoch": { "type": "integer", "minimum": 1 },
-    "repository": { "type": "string" },
-    "workflow": {
-      "type": "object",
-      "required": ["run_id", "run_attempt", "job", "workflow_ref", "server_url"],
-      "properties": {
-        "run_id": { "type": "string" },
-        "run_attempt": { "type": "string" },
-        "job": { "type": "string" },
-        "workflow_ref": { "type": "string" },
-        "server_url": { "type": "string" }
-      }
-    },
-    "git": {
-      "type": "object",
-      "required": ["base_sha", "candidate_sha", "head_ref", "ref", "dirty", "tree_sha", "pr_number", "pr_url"],
-      "properties": {
-        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "head_ref": { "type": "string" },
-        "ref": { "type": "string" },
-        "dirty": { "type": "boolean" },
-        "tree_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "pr_number": { "type": "string" },
-        "pr_url": { "type": "string" }
-      }
-    },
-    "execution": {
-      "type": "object",
-      "required": ["model", "agent", "exit_code", "opencode_version"],
-      "properties": {
-        "model": { "type": "string", "minLength": 1 },
-        "agent": { "type": "string", "minLength": 1 },
-        "exit_code": { "type": "integer" },
-        "opencode_version": { "type": "string", "minLength": 1 }
-      }
-    },
-    "artifacts": {
-      "type": "object",
-      "required": ["events", "stdout", "stderr"],
-      "properties": {
-        "events": { "$ref": "#/$defs/artifact" },
-        "stdout": { "$ref": "#/$defs/artifact" },
-        "stderr": { "$ref": "#/$defs/artifact" }
-      }
-    },
-    "created_at": { "type": "string", "format": "date-time" }
-  },
-  "$defs": {
-    "artifact": {
-      "type": "object",
-      "required": ["path", "sha256"],
-      "properties": {
-        "path": { "type": "string" },
-        "sha256": { "type": "string", "pattern": "^$|^[0-9a-f]{64}$" }
-      }
-    }
+    "schema": { "const": 1 },
+    "attempt_id": { "type": "string", "minLength": 3 },
+    "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "candidate_branch": { "type": "string" },
+    "model": { "type": "string" },
+    "agent": { "type": "string" },
+    "status": { "enum": ["opencode_failed", "validation_failed", "validated"] },
+    "opencode_exit": { "type": "integer" },
+    "validation_exit": { "type": "integer" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" }
   }
 }
