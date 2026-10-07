@@ -13,12 +13,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Syntax
+      - name: CargoWall
+        uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414
+        with:
+          mode: enforce
+          offline: true
+          fail-on-unsupported: true
+          sudo-lockdown: true
+
+      - name: Syntax and schema sanity
         run: |
           set -euo pipefail
           for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
+          python3 -m py_compile scripts/*.py
+          for f in schemas/*.json; do jq empty "$f"; done
+          ruby -e "require 'yaml'; YAML.load_file('action.yml'); YAML.load_file('admit/action.yml')"
       - name: Trajectory state-machine tests
         run: bash tests/test-trajectory.sh
+      - name: Trivy
+        uses: aquasecurity/trivy-action@c03d123cb480c08c69b054af418ea5e69fe6e57e
+        with:
+          scan-type: fs
+          scan-ref: .
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+
       - name: Zizmor
         uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
         with:
