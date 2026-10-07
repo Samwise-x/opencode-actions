@@ -1,0 +1,49 @@
+name: OpenCode Frontier
+on:
+  schedule:
+    - cron: "0,12,24,36,48 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+concurrency:
+  group: opencode-frontier-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  frontier:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 11
+    steps:
+      - name: CargoWall containment
+        uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414
+        with:
+          mode: enforce
+          offline: true
+          fail-on-unsupported: true
+          sudo-lockdown: true
+          allowed-hosts: |
+            opencode.ai
+            models.dev
+      - name: Run disposable frontier worker
+        id: frontier
+        uses: Samwise-x/opencode-actions@eddbf26cf01b162b0646f029dc6c85399c65005a
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: opencode/gpt-5.6-sol
+          agent: build
+          prompt-file: .github/opencode/frontier.md
+          validation-command: git diff --check
+          lease-seconds: "900"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### OpenCode frontier"
+            echo "- acquired: ${{ steps.frontier.outputs.acquired }}"
+            echo "- attempt: ${{ steps.frontier.outputs.attempt-id }}"
+            echo "- base: `${{ steps.frontier.outputs.base-sha }}`"
+            echo "- candidate: `${{ steps.frontier.outputs.candidate-sha }}`"
+            echo "- PR: ${{ steps.frontier.outputs.pr-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
