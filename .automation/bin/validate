@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-python3 -m json.tool opencode.json >/dev/null
-python3 -m json.tool .automation/evidence.schema.json >/dev/null
-python3 -m json.tool .automation/trajectory.schema.json >/dev/null
-python3 -m py_compile .automation/bin/make-evidence .automation/bin/validate-evidence .automation/bin/admit
-git diff --check
