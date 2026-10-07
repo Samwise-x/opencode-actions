@@ -20,6 +20,10 @@ jobs:
           offline: true
           fail-on-unsupported: true
           sudo-lockdown: true
+          allowed-hosts: |
+            get.trivy.dev
+            ghcr.io
+            pkg-containers.githubusercontent.com
 
       - name: Syntax and schema sanity
         run: |
