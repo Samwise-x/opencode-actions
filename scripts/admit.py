@@ -1,37 +1,17 @@
 #!/usr/bin/env python3
-"""Deterministically admit a qualified PR.
-
-Admission is intentionally model-free. It verifies:
-1. evidence manifest is successful and bound to the requested candidate SHA;
-2. PR head is exactly that candidate SHA;
-3. canonical base has not moved since the worker acquired its trajectory;
-4. every explicitly required GitHub check succeeded;
-5. GitHub accepts a merge request carrying the exact expected head SHA.
-
-Branch protection remains authoritative and can still reject the merge.
-"""
+"""Model-free protected-PR admission for an exact validated candidate."""
 
 from __future__ import annotations
-
-import argparse
-import json
-import os
-import sys
-import urllib.error
-import urllib.request
+import argparse, json, os, sys, urllib.error, urllib.request
 from pathlib import Path
 from typing import Any
 
-
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-
 
 def request(method: str, path: str, token: str, body: dict[str, Any] | None = None) -> Any:
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(
-        f"{API}{path}",
-        data=data,
-        method=method,
+        f"{API}{path}", data=data, method=method,
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
@@ -48,10 +28,9 @@ def request(method: str, path: str, token: str, body: dict[str, Any] | None = No
         payload = exc.read().decode(errors="replace")
         raise RuntimeError(f"GitHub API {method} {path} failed: {exc.code} {payload}") from exc
 
-
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""), required=False)
+    p.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     p.add_argument("--pr", type=int, required=True)
     p.add_argument("--candidate-sha", required=True)
     p.add_argument("--evidence", required=True)
@@ -77,7 +56,6 @@ def main() -> int:
 
     owner, repo = args.repository.split("/", 1)
     pr = request("GET", f"/repos/{owner}/{repo}/pulls/{args.pr}", token)
-
     if pr.get("state") != "open":
         raise SystemExit("PR is not open")
     if pr.get("head", {}).get("sha") != args.candidate_sha:
@@ -90,18 +68,13 @@ def main() -> int:
     current_base_sha = base.get("object", {}).get("sha")
     if current_base_sha != evidence.get("base_sha"):
         raise SystemExit(
-            f"canonical base moved: evidence={evidence.get('base_sha')} current={current_base_sha}; revalidate"
+            f"canonical base moved: evidence={evidence.get('base_sha')} current={current_base_sha}; reconstruct"
         )
 
-    checks = request(
-        "GET",
-        f"/repos/{owner}/{repo}/commits/{args.candidate_sha}/check-runs?per_page=100",
-        token,
-    )
+    checks = request("GET", f"/repos/{owner}/{repo}/commits/{args.candidate_sha}/check-runs?per_page=100", token)
     by_name: dict[str, list[dict[str, Any]]] = {}
     for check in checks.get("check_runs", []):
         by_name.setdefault(check.get("name", ""), []).append(check)
-
     for required in args.required_check:
         runs = by_name.get(required, [])
         if not runs:
@@ -109,14 +82,11 @@ def main() -> int:
         latest = max(runs, key=lambda x: x.get("completed_at") or x.get("started_at") or "")
         if latest.get("status") != "completed" or latest.get("conclusion") != "success":
             raise SystemExit(
-                f"required check not successful: {required}: "
-                f"{latest.get('status')}/{latest.get('conclusion')}"
+                f"required check not successful: {required}: {latest.get('status')}/{latest.get('conclusion')}"
             )
 
     result = request(
-        "PUT",
-        f"/repos/{owner}/{repo}/pulls/{args.pr}/merge",
-        token,
+        "PUT", f"/repos/{owner}/{repo}/pulls/{args.pr}/merge", token,
         {
             "sha": args.candidate_sha,
             "merge_method": args.merge_method,
@@ -125,7 +95,6 @@ def main() -> int:
     )
     if not result.get("merged"):
         raise SystemExit(f"GitHub refused admission: {result.get('message', 'unknown reason')}")
-
     print(json.dumps({
         "admitted": True,
         "candidate_sha": args.candidate_sha,
@@ -133,7 +102,6 @@ def main() -> int:
         "pr": args.pr,
     }, sort_keys=True))
     return 0
-
 
 if __name__ == "__main__":
     try:
