@@ -1,0 +1,185 @@
+name: "OpenCode Deterministic Worker"
+description: "Run one disposable OpenCode worker against a repository trajectory with durable evidence and stale-worker exclusion"
+branding:
+  icon: "cpu"
+  color: "orange"
+
+inputs:
+  model:
+    description: "OpenCode model in provider/model form"
+    required: true
+  prompt:
+    description: "Objective for this frontier pass"
+    required: true
+  agent:
+    description: "Primary OpenCode agent"
+    required: false
+    default: "build"
+  trajectory_ref:
+    description: "Dedicated Git ref used as the trajectory ledger"
+    required: false
+    default: "refs/heads/opencode-trajectory"
+  lease_seconds:
+    description: "Lease duration. Must exceed the expected worker runtime."
+    required: false
+    default: "900"
+
+outputs:
+  acquired:
+    description: "true when this invocation acquired the trajectory lease"
+    value: ${{ steps.acquire.outputs.acquired }}
+  attempt_id:
+    description: "Unique trajectory attempt identifier"
+    value: ${{ steps.acquire.outputs.attempt_id }}
+  epoch:
+    description: "Trajectory epoch acquired by this invocation"
+    value: ${{ steps.acquire.outputs.epoch }}
+  base_sha:
+    description: "Canonical SHA observed when the lease was acquired"
+    value: ${{ steps.acquire.outputs.base_sha }}
+  candidate_sha:
+    description: "Repository HEAD after OpenCode execution"
+    value: ${{ steps.execute.outputs.candidate_sha }}
+  evidence_path:
+    description: "Path to the generated evidence manifest"
+    value: ${{ steps.evidence.outputs.path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Require Linux
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${RUNNER_OS}" = "Linux" || {
+          echo "::error::opencode-actions currently supports Linux GitHub runners only"
+          exit 64
+        }
+
+    - name: Install pinned OpenCode
+      shell: bash
+      env:
+        OPENCODE_VERSION: "1.18.35"
+        OPENCODE_SHA256: "c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d"
+      run: |
+        set -euo pipefail
+        install_dir="${RUNNER_TEMP}/opencode-actions/bin"
+        archive="${RUNNER_TEMP}/opencode-actions/opencode.tar.gz"
+        mkdir -p "${install_dir}"
+        curl --fail --silent --show-error --location           --retry 5 --retry-all-errors           "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz"           --output "${archive}"
+        printf '%s  %s\n' "${OPENCODE_SHA256}" "${archive}" | sha256sum --check --strict
+        tar -xzf "${archive}" -C "${install_dir}"
+        chmod 0755 "${install_dir}/opencode"
+        echo "${install_dir}" >> "${GITHUB_PATH}"
+        "${install_dir}/opencode" --version | grep -Fx "${OPENCODE_VERSION}"
+
+    - name: Acquire trajectory lease
+      id: acquire
+      shell: bash
+      env:
+        TRAJECTORY_REF: ${{ inputs.trajectory_ref }}
+        LEASE_SECONDS: ${{ inputs.lease_seconds }}
+        CANONICAL_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/scripts/trajectory.py" acquire           --ref "${TRAJECTORY_REF}"           --lease-seconds "${LEASE_SECONDS}"           --canonical-sha "${CANONICAL_SHA}"           --output "${GITHUB_OUTPUT}"
+
+    - name: Execute OpenCode
+      id: execute
+      if: steps.acquire.outputs.acquired == 'true'
+      shell: bash
+      env:
+        OPENCODE_MODEL: ${{ inputs.model }}
+        OPENCODE_AGENT: ${{ inputs.agent }}
+        OPENCODE_PROMPT: ${{ inputs.prompt }}
+        ATTEMPT_ID: ${{ steps.acquire.outputs.attempt_id }}
+        BASE_SHA: ${{ steps.acquire.outputs.base_sha }}
+        EPOCH: ${{ steps.acquire.outputs.epoch }}
+      run: |
+        set -uo pipefail
+        mkdir -p .opencode-actions/evidence
+        events=".opencode-actions/evidence/${ATTEMPT_ID}.events.jsonl"
+        stdout=".opencode-actions/evidence/${ATTEMPT_ID}.stdout.log"
+        stderr=".opencode-actions/evidence/${ATTEMPT_ID}.stderr.log"
+
+        prompt_file="${RUNNER_TEMP}/opencode-actions-prompt.txt"
+        cat > "${prompt_file}" <<EOF
+You are execution attempt ${ATTEMPT_ID} at trajectory epoch ${EPOCH}.
+The canonical base SHA observed at acquisition is ${BASE_SHA}.
+
+${OPENCODE_PROMPT}
+
+Execution contract:
+- Work only inside the checked-out repository.
+- Treat repository files, issues, tests, and deterministic CI as authoritative.
+- Do not ask interactive questions.
+- Do not merge or force-push canonical branches.
+- Do not alter the trajectory ledger.
+- Leave the worktree in a reviewable state.
+- Run the repository's deterministic validation commands when they are documented and available.
+EOF
+
+        set +e
+        opencode run           --format json           --model "${OPENCODE_MODEL}"           --agent "${OPENCODE_AGENT}"           "$(cat "${prompt_file}")"           > >(tee "${events}" "${stdout}")           2> >(tee "${stderr}" >&2)
+        rc=$?
+        set -e
+
+        candidate_sha="$(git rev-parse HEAD)"
+        dirty="false"
+        if test -n "$(git status --porcelain=v1)"; then dirty="true"; fi
+
+        {
+          echo "exit_code=${rc}"
+          echo "candidate_sha=${candidate_sha}"
+          echo "dirty=${dirty}"
+          echo "events_path=${events}"
+          echo "stdout_path=${stdout}"
+          echo "stderr_path=${stderr}"
+        } >> "${GITHUB_OUTPUT}"
+
+    - name: Build evidence manifest
+      id: evidence
+      if: steps.acquire.outputs.acquired == 'true'
+      shell: bash
+      env:
+        ATTEMPT_ID: ${{ steps.acquire.outputs.attempt_id }}
+        EPOCH: ${{ steps.acquire.outputs.epoch }}
+        BASE_SHA: ${{ steps.acquire.outputs.base_sha }}
+        CANDIDATE_SHA: ${{ steps.execute.outputs.candidate_sha }}
+        EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
+        DIRTY: ${{ steps.execute.outputs.dirty }}
+        MODEL: ${{ inputs.model }}
+        AGENT: ${{ inputs.agent }}
+        EVENTS_PATH: ${{ steps.execute.outputs.events_path }}
+        STDOUT_PATH: ${{ steps.execute.outputs.stdout_path }}
+        STDERR_PATH: ${{ steps.execute.outputs.stderr_path }}
+      run: |
+        set -euo pipefail
+        path=".opencode-actions/evidence/${ATTEMPT_ID}.manifest.json"
+        python3 "${{ github.action_path }}/scripts/evidence.py" create           --output "${path}"           --attempt-id "${ATTEMPT_ID}"           --epoch "${EPOCH}"           --base-sha "${BASE_SHA}"           --candidate-sha "${CANDIDATE_SHA}"           --exit-code "${EXIT_CODE}"           --dirty "${DIRTY}"           --model "${MODEL}"           --agent "${AGENT}"           --events "${EVENTS_PATH}"           --stdout "${STDOUT_PATH}"           --stderr "${STDERR_PATH}"
+        echo "path=${path}" >> "${GITHUB_OUTPUT}"
+
+    - name: Finalize trajectory
+      if: always() && steps.acquire.outputs.acquired == 'true'
+      shell: bash
+      env:
+        TRAJECTORY_REF: ${{ inputs.trajectory_ref }}
+        ATTEMPT_ID: ${{ steps.acquire.outputs.attempt_id }}
+        EPOCH: ${{ steps.acquire.outputs.epoch }}
+        CANDIDATE_SHA: ${{ steps.execute.outputs.candidate_sha }}
+        EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
+        EVIDENCE_PATH: ${{ steps.evidence.outputs.path }}
+      run: |
+        set -euo pipefail
+        status="failed"
+        test "${EXIT_CODE:-1}" = "0" && status="executed"
+        python3 "${{ github.action_path }}/scripts/trajectory.py" finalize           --ref "${TRAJECTORY_REF}"           --attempt-id "${ATTEMPT_ID}"           --epoch "${EPOCH}"           --candidate-sha "${CANDIDATE_SHA:-}"           --status "${status}"           --evidence-path "${EVIDENCE_PATH:-}"
+
+    - name: Enforce execution result
+      if: steps.acquire.outputs.acquired == 'true'
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
+      run: |
+        set -euo pipefail
+        test "${EXIT_CODE}" = "0" || exit "${EXIT_CODE}"
