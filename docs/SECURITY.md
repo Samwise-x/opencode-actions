@@ -1,37 +1,71 @@
-# Security model
+# Security contract
 
-## Probabilistic zone
+## Trust zones
 
-OpenCode and any delegated subagent are untrusted candidate producers.
+### Probabilistic zone
 
-Before model execution, GitHub credentials are removed, GitHub Actions command-file paths are replaced with decoys, the immutable action checkout is hashed, and CargoWall starts with `mode: enforce`, `offline: true`, `fail-on-unsupported: true`, and `sudo-lockdown: true`.
+The frontier OpenCode/model process is untrusted for canonical authority.
 
-After execution, the action checkout digest is rechecked before any privileged mutation.
+It receives source code, issue/PR context, selected provider credentials needed for inference, and only the runtime capabilities permitted by repository OpenCode policy. It does not receive the admission token or a GitHub mutation token.
 
-## GitHub authority separation
+### Candidate-validation zone
 
-The frontier wrapper owns a normal repository token only in deterministic pre/post steps. The OpenCode process receives neither `GH_TOKEN` nor `GITHUB_TOKEN`.
+Candidate code is untrusted. Deterministic/security jobs run with read-only repository authority and no admission secret or OIDC signing authority.
 
-The final `ADMISSION_TOKEN` is a separate credential exposed only to the admission workflow. It should be a narrowly scoped GitHub App installation token or equivalent credential with just enough authority to advance canonical state and close the accepted issue.
+### Trusted qualification zone
 
-## Git metadata isolation
+The seal job runs only after deterministic and security jobs succeed. It checks out the original canonical base, not candidate code, before entering the canonical Nix environment. It has OIDC solely to create the keyless Cosign signature.
 
-Do not trust the worker worktree's `.git` directory after model execution. Publication creates a fresh Git repository in RUNNER_TEMP, fetches trusted refs, mirrors candidate filesystem content while excluding `.git`, stages the result, rechecks protected paths, and only then commits/pushes.
+### Trusted admission zone
 
-Trajectory CAS operations also create a fresh temporary Git repository per invocation.
+Admission executes no candidate code. It verifies evidence and GitHub state, then performs one atomic fast-forward CAS.
 
-This prevents candidate-controlled local Git config, hooks, clean/smudge filters, remotes, or credential helpers from becoming privileged execution paths.
+## Credential separation
 
-## Protected control plane
+OPENCODE_API_KEY belongs only to the frontier job.
 
-The target installs `.opencode-actions/protected-paths.txt`. The default policy protects the three orchestration workflows, OpenCode configuration/plugins, context/ADR files, Nix/Dagger control files, and Zizmor/Trivy policy.
+ADMISSION_TOKEN belongs only to the admission job.
 
-OpenCode permissions deny those edits first. Deterministic path validation denies them again before publication and admission. A candidate cannot redefine the tests or controls that qualify itself.
+GitHub OIDC signing authority belongs only to the trusted seal job.
 
-## Network containment
+Do not collapse these credentials into one job or one long-lived token.
 
-CargoWall restricts the probabilistic job to GitHub infrastructure plus explicitly allowed model/provider/build destinations. Provider hosts remain an intentional egress channel because inference requires them, which is precisely why GitHub admission credentials are absent from the model process.
+## Model-job defense in depth
 
-## Remaining boundary
+The model subprocess has GH_TOKEN and GITHUB_TOKEN removed; GitHub command-file environment variables redirected to decoys; strict CargoWall enforcement, offline policy mode, fail-on-unsupported, and sudo lockdown; OpenCode question/web network/external-directory permissions denied; a runtime plugin that blanks secret-like environment variables for shell tools and blocks direct GitHub/Git mutation commands; protected-path checks; HEAD/conflict checks; bounded runtime; and post-run process cleanup.
 
-This is strong CI containment, not a hypervisor. Candidate code can consume runner CPU/memory, alter ordinary candidate files, and transmit data to explicitly allowed provider hosts. Repositories treating candidate code as actively hostile should add a disposable VM/container boundary around the probabilistic job.
+These controls reduce model authority. They do not make model output trustworthy. Trust is conferred only by deterministic qualification plus admission.
+
+## Supply-chain pins
+
+Production templates pin third-party GitHub Actions to immutable commit SHAs.
+
+OpenCode is downloaded from a fixed release asset and SHA-256 verified before execution.
+
+The target flake.lock owns the reproducible Dagger/Cosign/project toolchain. Workflows use --no-write-lock-file; CI may not silently mutate it.
+
+## Network
+
+CargoWall is authoritative around the probabilistic worker and trusted sign/admit phases.
+
+Provider-specific hosts belong in OPENCODE_ALLOWED_HOSTS. Keep the set minimal. Do not wildcard broad public hosting domains merely to make a failing build green.
+
+Candidate validation is intentionally isolated from provider/admission secrets. It may require broader package/build egress because it executes the project's Nix/Dagger graph.
+
+## Protected policy
+
+The default protected-path file prevents autonomous workers from changing their own workflow, admission, Nix/Dagger, OpenCode, scanner, architecture, and ADR control plane.
+
+Repository-specific control files should be added before production.
+
+## Branch rules and admission identity
+
+The dedicated admission identity may need a narrowly scoped ruleset bypass to fast-forward protected main. That exception belongs only to the admission identity.
+
+A worker identity with the same bypass destroys the security model.
+
+## Evidence
+
+Worker evidence is diagnostic and attributable but not sufficient for admission.
+
+Qualification is a separate document produced only after exact-SHA deterministic/security jobs succeed and is signed through GitHub OIDC with Cosign. Admission verifies the expected workflow identity and OIDC issuer before using it.

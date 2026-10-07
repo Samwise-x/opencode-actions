@@ -2,59 +2,82 @@
 
 ## Ownership
 
-| Concern | Owner |
-| --- | --- |
-| Work definition | GitHub Issues + repository context |
-| Candidate cognition/execution | disposable OpenCode worker |
-| Cross-run serialization | trajectory ref + force-with-lease CAS |
-| Proposed implementation | persistent issue branch + PR |
-| Correctness | deterministic Nix/Dagger + security checks |
-| Qualification | signed exact-SHA manifest |
-| Accepted state | canonical protected ref |
-| Recovery | Git/GitHub canonical state |
+OpenCode owns model execution, tool execution, delegation, compaction, and runtime event emission.
 
-## State machine
+GitHub owns triggers, identities, Issues, pull requests, refs, commit history, checks, and workflow artifacts.
 
-`idle -> leased -> validated -> admitted` is the successful path.
+Repository policy owns trajectory selection, cross-run single-writer coordination, evidence qualification, protected paths, and canonical admission.
 
-`leased -> failed` records failure without advancing canonical state. A lease expires automatically. A candidate awaiting required checks blocks redundant worker execution. A failed candidate remains on its persistent issue branch so the next fresh model can continue from Git state rather than session state.
+## Core invariant
 
-The trajectory branch contains coordination state only. It never contains implementation code and never replaces Issues/PRs as work state.
+OpenCode may mutate candidate state. OpenCode must never decide that candidate state became canonical truth.
 
-## Frontier selection
+The model process therefore never receives the credential used for final admission.
 
-The primary trajectory is singular. Existing open `opencode/issue-N` PRs are resumed before new work. Otherwise the selector chooses an open `ready-for-agent` issue ordered by P0/P1/P2/P3 priority and then age/issue number.
+## Reconstructable trajectory
 
-The persistent issue branch carries implementation continuity across model turnover. The model itself is disposable.
+A fresh worker reconstructs from canonical main, open GitHub Issues, open candidate PRs, candidate refs, and current CI state. The trusted wrapper selects one frontier before model execution and injects that issue/PR context into the prompt.
+
+OpenCode session IDs remain useful evidence but are not recovery dependencies.
+
+## Single writer
+
+opencode/trajectory contains a tiny JSON coordination record. Acquisition and finalization update the ref with Git force-with-lease. An unexpired lease blocks another frontier worker.
+
+The state also records the last base/candidate/issue/PR. If the previous candidate is still validating, or has passed checks and is waiting for admission, a new worker does not create competing progress. Failed qualification or a moved canonical base permits reconstruction.
+
+This branch is coordination metadata, not system truth. Canonical truth remains protected main.
+
+## Candidate continuity
+
+One issue maps to one persistent branch:
+
+    opencode/issue-<issue-number>
+
+A successor fetches that branch, merges current canonical main without committing, and lets the fresh model resolve any conflict and continue the same work. Publication uses force-with-lease against the branch head observed before model execution, so a stale worker cannot overwrite a newer candidate.
 
 ## Evidence chain
 
-Worker evidence binds attempt, issue, base SHA, model/agent, OpenCode event stream digest, worktree diff digest, prevalidation result, candidate SHA, and PR.
+The worker uploads evidence.json plus raw OpenCode NDJSON, stderr, diff, status, and lightweight validation output. Final worker evidence binds attempt, issue, base SHA, candidate SHA, model/agent, OpenCode session IDs, and hashes of raw evidence.
 
-Candidate CI independently evaluates the exact PR head. The trusted seal job consumes worker evidence and emits a qualification binding repository, base SHA, candidate SHA, issue, PR, attempt, required checks, and the frontier-evidence digest.
+Independent candidate jobs run the canonical Nix/Dagger graph and security checks. Only after both jobs succeed does a trusted job create qualification.json, bind it to the worker evidence hash and exact candidate/base/PR, then keylessly sign it with Cosign.
 
-Cosign signs that qualification with GitHub OIDC. Admission accepts only a signature whose certificate identity corresponds to the target repository's configured validation workflow.
+Admission verifies the Sigstore workflow identity and the current GitHub state again.
 
-## Privileged mutation boundary
+## Admission serialization point
 
-The probabilistic worktree is never trusted as a Git control plane after model execution. Candidate publication reconstructs a fresh Git repository under RUNNER_TEMP, overlays only worktree content while excluding `.git` and evidence internals, reruns protected-path checks, commits there, and pushes with force-with-lease.
+The final transition is:
 
-Trajectory acquisition/finalization likewise uses an isolated temporary Git repository. Model-controlled local Git config, hooks, filters, remotes, and object metadata therefore do not become privileged execution inputs.
+    qualification is authentic
+    AND candidate == PR head
+    AND required checks(candidate) == success
+    AND current main == qualified base
+    AND candidate descends from qualified base
+    AND candidate changes no protected path
+    THEN
+        git push --force-with-lease=main:<qualified-base> <candidate>:main
+    ELSE
+        reject
 
-## Admission
+Because candidate ancestry is required, the resulting canonical update is a fast-forward. Force-with-lease supplies the compare-and-swap guard against concurrent movement of main.
 
-Admission requires signed qualification, exact PR-head equality, exact canonical-base equality, successful named checks on the candidate SHA, descendant ancestry, no protected-path changes, and a dedicated admission credential.
+## Runtime containment
 
-The final write is:
+OpenCode permissions are tool policy, not operating-system isolation. The model job therefore layers:
 
-`force-with-lease(canonical_ref, expected=base_sha, new=candidate_sha)`
+- no GitHub mutation token in the OpenCode environment;
+- strict CargoWall with sudo lockdown;
+- decoy GitHub Actions command files;
+- protected file policy;
+- repository-owned OpenCode permission rules and runtime guard plugin;
+- action-byte hash before/after model execution;
+- HEAD/conflict checks;
+- process cleanup after the model exits;
+- complete Git config replacement before privileged Git operations;
+- absolute trusted executable paths in privileged phases.
 
-If canonical state moved, the write fails and the system reconstructs from the new truth.
+The deterministic wrapper, not the model, performs GitHub mutation.
 
-## Nix and Dagger
+## Model/provider replaceability
 
-Nix fixes the project toolchain/environment. Dagger owns the portable validation graph. Candidate CI calls:
-
-`nix develop --no-write-lock-file --command dagger call validate`
-
-Project-specific checks belong inside that Dagger graph instead of being duplicated into orchestration.
+The durable contract names only the OpenCode model identifier and provider credentials. A worker can use a different frontier model without changing trajectory, evidence, CI, or admission semantics.

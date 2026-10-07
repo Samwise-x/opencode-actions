@@ -1,67 +1,73 @@
 # Deployment
 
-This repository is a handoff package. The target repository receives the templates and keeps this implementation pinned by immutable commit SHA.
+This repository is a handoff substrate. The target repository receives the templates and pins this implementation by commit SHA.
 
-## 1. Copy target files
+## 1. Canonical build environment
 
-- `templates/frontier.yml` -> `.github/workflows/opencode-frontier.yml`
-- `templates/candidate-validation.yml` -> `.github/workflows/opencode-candidate-validation.yml`
-- `templates/admit.yml` -> `.github/workflows/opencode-admit.yml`
-- `templates/frontier.md` -> `.github/opencode/frontier.md`
-- `templates/opencode.json` -> `opencode.json`
-- `templates/protected-paths.txt` -> `.opencode-actions/protected-paths.txt`
+The target must have committed flake.nix and flake.lock.
 
-Do not replace immutable action SHAs with floating tags.
+The canonical dev shell must contain project build/test dependencies, Dagger CLI, and Cosign CLI.
 
-## 2. Supply deterministic project validation
+The target Dagger module must expose:
 
-Commit `flake.nix` and `flake.lock`. The Nix development environment must expose Dagger.
+    dagger call validate
 
-Provide a Dagger module with a zero-argument `validate` function. It should own formatting, linting, unit/integration tests, build/package validation, and repository-specific deterministic policy.
+That call is the portable deterministic build/test/package graph. Local and CI validation should execute the same graph.
 
-Candidate CI contract:
+## 2. Install repository files
 
-`nix develop --no-write-lock-file --command dagger call validate`
+Copy the files listed in the root README. Do not copy runtime evidence or trajectory state into main.
 
-## 3. Configure work state
+Review .opencode-actions/protected-paths.txt. Its default denies autonomous modification of workflow/admission policy, OpenCode policy/plugins, AGENTS/CONTEXT/ADRs, Nix/Dagger definitions, and security scanner policy.
 
-Create the `ready-for-agent` label. Optional understood priorities are `priority:p0` through `priority:p3` plus critical/high/medium/low aliases.
+## 3. Configure OpenCode
 
-Only apply `ready-for-agent` after blocking dependencies are resolved.
+Set OPENCODE_MODEL.
 
-## 4. Configure model access
+Create the provider credential required by that model. The included example uses OPENCODE_API_KEY.
 
-Actions secret: `OPENCODE_API_KEY`.
+Set OPENCODE_ALLOWED_HOSTS to the smallest CargoWall egress allowlist needed by that provider and the lightweight pre-publish validation command. GitHub service hosts required by Actions are automatically covered by CargoWall.
 
-Actions variable: `OPENCODE_MODEL`.
+Do not enable OpenCode session sharing for the worker.
 
-Actions variable: `OPENCODE_ALLOWED_HOSTS`, newline-separated CargoWall host[:port] entries needed by the model provider or project-specific worker commands.
+## 4. Configure the admission identity
 
-## 5. Configure admission authority
+Create a dedicated GitHub App or equivalently scoped token for ADMISSION_TOKEN.
 
-Create `ADMISSION_TOKEN` as a dedicated GitHub App installation token or equivalent credential exposed only to `.github/workflows/opencode-admit.yml`.
+It needs only the authority required to read repository/PR/ref state, fast-forward the canonical branch despite the ordinary PR-only rule, and close the accepted Issue.
 
-It needs the minimum authority required to update the canonical branch and close the accepted issue. If the canonical ruleset blocks all direct updates, grant bypass only to this admission identity.
+It must not be available to the frontier worker, deterministic candidate job, or security candidate job.
 
-The frontier worker identity must not receive ruleset bypass.
+If the repository ruleset cannot narrowly allow this identity to perform the exact final fast-forward, deployment is incomplete. Do not compensate by granting the ordinary worker broad bypass.
 
-## 6. Protect canonical state
+## 5. Canonical branch rules
 
-Block ordinary direct pushes to `main`. Require `deterministic` and `security` for normal PRs. Keep control-plane files under CODEOWNERS/rulesets where practical.
+Protect main.
 
-Automated admission independently rechecks named checks and exact-SHA CAS, so branch protection is defense in depth rather than the only correctness boundary.
+For ordinary changes, require PRs and successful deterministic and security checks. Deny force pushes/non-fast-forward updates. Do not grant worker credentials ruleset bypass.
 
-## 7. Acceptance test before enabling cron
+The admission algorithm still verifies current base, exact PR head, exact check runs, ancestry, protected paths, signed qualification, and then uses force-with-lease. Branch rules are defense in depth, not the algorithm itself.
 
-1. Dispatch one explicit issue.
-2. Confirm one candidate branch/PR is created.
-3. Confirm OpenCode cannot push or call GitHub directly.
-4. Confirm attempt evidence is uploaded.
-5. Confirm deterministic/security jobs run on the exact PR head.
-6. Confirm the seal artifact contains `qualification.json` and a Sigstore bundle.
-7. Move `main` before admission and confirm stale admission rejects.
-8. Move the PR head after qualification and confirm exact-SHA rejection.
-9. Attempt a protected-path edit and confirm publication/admission rejects it.
-10. Overlap two frontier dispatches and confirm one trajectory lease owns execution.
+## 6. Labels
 
-Only after those checks should the five-times-per-hour schedule remain enabled.
+Create ready-for-agent.
+
+Optional deterministic priority labels understood by the selector are priority:p0/critical, priority:p1/high, priority:p2/medium, and priority:p3/low.
+
+Without priority labels, oldest ready issue then lowest issue number wins.
+
+## 7. Prove the protocol before scheduling
+
+Keep the schedule workflow disabled or remove its schedule trigger during acceptance.
+
+Run one explicit issue manually. Confirm the model receives issue/PR context and produces one opencode/issue-N branch and PR.
+
+Then deliberately test validation failure, worker interruption, overlapping frontier runs, candidate branch movement after evidence, canonical main movement after qualification, protected-path modification, tampered qualification, expired lease recovery, and one successful exact-SHA admission.
+
+Every failure must leave canonical main unchanged.
+
+## 8. Enable cadence
+
+Enable the 12-minute schedule only after all acceptance cases pass.
+
+A no-work frontier finalizes idle. A currently validating candidate returns validation_pending. A qualified candidate waiting for admission returns admission_pending. These are normal states, not worker failures.

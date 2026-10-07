@@ -60,6 +60,10 @@ inputs:
     description: SHA-256 of pinned OpenCode Linux x64 release asset.
     required: false
     default: c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d
+  opencode-linux-arm64-sha256:
+    description: SHA-256 of pinned OpenCode Linux arm64 release asset.
+    required: false
+    default: f7f2ba59ee8aa94d388f9696575a32d20e71c2ee48def9f80fc693a60fec6c72
 
 outputs:
   acquired:
@@ -111,8 +115,9 @@ runs:
       shell: bash
       env:
         OPENCODE_VERSION: ${{ inputs.opencode-version }}
-        OPENCODE_ASSET_SHA256: ${{ inputs.opencode-linux-x64-sha256 }}
-      run: /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/install-opencode.sh" "$OPENCODE_VERSION" "$OPENCODE_ASSET_SHA256"
+        OPENCODE_X64_SHA256: ${{ inputs.opencode-linux-x64-sha256 }}
+        OPENCODE_ARM64_SHA256: ${{ inputs.opencode-linux-arm64-sha256 }}
+      run: /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/install-opencode.sh" "$OPENCODE_VERSION" "$OPENCODE_X64_SHA256" "$OPENCODE_ARM64_SHA256"
 
     - id: lease
       name: Acquire trajectory lease
@@ -146,8 +151,7 @@ runs:
         BRANCH_PREFIX: ${{ inputs.branch-prefix }}
       run: |
         set -euo pipefail
-        mkdir -p .opencode-evidence
-        /usr/bin/python3 "$GITHUB_ACTION_PATH/scripts/select-frontier.py"           --base "$BASE_BRANCH"           --branch-prefix "$BRANCH_PREFIX"           --issue "$EXPLICIT_ISSUE"           --output .opencode-evidence/frontier.json           --github-output "$GITHUB_OUTPUT"
+        /usr/bin/python3 "$GITHUB_ACTION_PATH/scripts/select-frontier.py"           --base "$BASE_BRANCH"           --branch-prefix "$BRANCH_PREFIX"           --issue "$EXPLICIT_ISSUE"           --output "$RUNNER_TEMP/opencode-frontier.json"           --github-output "$GITHUB_OUTPUT"
 
     - id: prepare
       name: Prepare persistent candidate branch
@@ -190,6 +194,17 @@ runs:
           exit 70
         fi
 
+    - id: policy
+      name: Pin repository-owned protected-path policy
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      shell: bash
+      env:
+        POLICY: ${{ inputs.protected-paths-file }}
+      run: |
+        set -euo pipefail
+        test -f "$POLICY"
+        echo "sha=$(/usr/bin/sha256sum "$POLICY" | /usr/bin/awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
     - name: Start CargoWall containment
       if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
       uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414 # v1.3.7
@@ -211,7 +226,7 @@ runs:
         MODEL: ${{ inputs.model }}
         AGENT: ${{ inputs.agent }}
         PROMPT_FILE: ${{ inputs.prompt-file }}
-        SELECTION_FILE: .opencode-evidence/frontier.json
+        SELECTION_FILE: ${{ runner.temp }}/opencode-frontier.json
         PROTECTED_PATHS_FILE: ${{ inputs.protected-paths-file }}
         VALIDATION_COMMAND: ${{ inputs.validation-command }}
         ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
@@ -219,7 +234,7 @@ runs:
         PREPARED_HEAD: ${{ steps.prepare.outputs.prepared_head }}
         MERGE_CONFLICT: ${{ steps.prepare.outputs.merge_conflict }}
         WORKER_SECONDS: ${{ inputs.worker-seconds }}
-        EVIDENCE_DIR: .opencode-evidence
+        EVIDENCE_DIR: ${{ runner.temp }}/opencode-evidence
         OCA_ACTION_ROOT: ${{ github.action_path }}
         GH_TOKEN: ""
         GITHUB_TOKEN: ""
@@ -230,15 +245,19 @@ runs:
         GITHUB_STEP_SUMMARY: ${{ runner.temp }}/opencode-decoy-summary
       run: /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/worker.sh"
 
-    - name: Revalidate automation bytes after model execution
+    - name: Revalidate automation and policy bytes after model execution
       if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
       shell: bash
       env:
-        EXPECTED: ${{ steps.integrity.outputs.action_digest }}
+        EXPECTED_ACTION: ${{ steps.integrity.outputs.action_digest }}
+        POLICY: ${{ inputs.protected-paths-file }}
+        EXPECTED_POLICY: ${{ steps.policy.outputs.sha }}
       run: |
         set -euo pipefail
-        actual="$(find "$GITHUB_ACTION_PATH" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
-        test "$actual" = "$EXPECTED" || { echo "::error::automation action bytes changed during model execution"; exit 71; }
+        actual_action="$(find "$GITHUB_ACTION_PATH" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+        test "$actual_action" = "$EXPECTED_ACTION" || { echo "::error::automation action bytes changed during model execution"; exit 71; }
+        actual_policy="$(/usr/bin/sha256sum "$POLICY" | /usr/bin/awk '{print $1}')"
+        test "$actual_policy" = "$EXPECTED_POLICY" || { echo "::error::protected-path policy changed during model execution"; exit 72; }
 
     - id: publish
       name: Publish candidate and PR
@@ -252,7 +271,7 @@ runs:
         ISSUE_TITLE: ${{ steps.frontier.outputs.issue_title }}
         CANDIDATE_BRANCH: ${{ steps.frontier.outputs.branch }}
         EXPECTED_REMOTE_HEAD: ${{ steps.prepare.outputs.remote_head }}
-        EVIDENCE_DIR: .opencode-evidence
+        EVIDENCE_DIR: ${{ runner.temp }}/opencode-evidence
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         OCA_ACTION_ROOT: ${{ github.action_path }}
         PROTECTED_PATHS_FILE: ${{ inputs.protected-paths-file }}
@@ -282,7 +301,7 @@ runs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: opencode-evidence-${{ steps.meta.outputs.attempt_id }}
-        path: .opencode-evidence/
+        path: ${{ runner.temp }}/opencode-evidence/
         if-no-files-found: warn
         retention-days: 90
 

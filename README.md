@@ -1,71 +1,115 @@
 # opencode-actions
 
-GitHub-native production substrate for one logical software trajectory inhabited sequentially by disposable OpenCode workers.
+Production handoff for a **single logical repository trajectory** executed by fresh, disposable OpenCode workers on GitHub Actions.
 
-## Core invariant
+## The invariant
 
-OpenCode may produce candidate state. OpenCode never decides that candidate state became canonical truth.
+> OpenCode may produce candidate state. OpenCode does not decide that candidate state became canonical truth.
 
-Model context, OpenCode sessions, local SQLite state, background tasks, and runner filesystems are disposable. Durable continuity is reconstructed from Git/GitHub state, issue/PR state, immutable commits, trajectory coordination state, and exact-SHA evidence.
+Git/GitHub state is the durable body. OpenCode is disposable execution. Models/providers are replaceable cognition. Deterministic CI qualifies candidate SHAs. Admission is a model-free compare-and-swap of the canonical ref.
 
-## Production protocol
+No OpenCode session, local SQLite database, model context, background registry, or runner filesystem is required for recovery.
 
-1. A scheduled frontier run starts from canonical `main`.
-2. `opencode/trajectory` grants one expiring lease using Git force-with-lease compare-and-swap.
-3. The wrapper deterministically resumes the oldest open `opencode/issue-N` PR, otherwise selects the highest-priority oldest open issue labeled `ready-for-agent`.
-4. The persistent issue branch is reconstructed against current canonical state before the model runs.
-5. GitHub credentials are removed, GitHub Actions command files are replaced with decoys, the loaded action bytes are hashed, and CargoWall starts fail-closed.
-6. A fresh SHA-verified OpenCode binary runs one bounded pass and leaves candidate changes in the worktree.
-7. Deterministic policy rejects HEAD mutation, unresolved conflicts, protected-control-plane edits, or failed pre-publish checks.
-8. Publication occurs from a fresh trusted Git repository in RUNNER_TEMP, never from model-controlled `.git` metadata.
-9. The wrapper force-with-lease updates the persistent issue branch and creates/updates its PR.
-10. Independent CI runs the repository's pinned Nix/Dagger validation graph plus Zizmor and Trivy.
-11. A trusted seal job consumes immutable worker evidence and emits an exact-SHA qualification manifest signed keylessly with Cosign.
-12. Admission verifies the Sigstore workflow identity, PR head, canonical base, named checks, ancestry, and protected paths, then performs one force-with-lease fast-forward of canonical state.
+## What this repository contains
 
-The final canonical ref CAS is the serialization point.
+- action.yml: one bounded frontier worker: lease, reconstruct, execute, prevalidate, publish, evidence.
+- seal/action.yml: trusted post-validation qualification and keyless Cosign signature.
+- admit/action.yml: signed-evidence verification plus exact-SHA canonical CAS.
+- scripts/trajectory.sh: global expiring single-writer lease on opencode/trajectory.
+- scripts/select-frontier.py: deterministic GitHub Issue/PR frontier reconstruction.
+- scripts/worker.sh: tokenless OpenCode execution and evidence export.
+- scripts/publish.*: trusted candidate commit/ref/PR mutation after the model exits.
+- scripts/admit.py: final ancestry, evidence, checks, protected-path and base-SHA revalidation.
+- templates/: the three caller workflows, worker prompt, OpenCode config, runtime guard, and protected-path policy.
+- schemas/: machine-readable trajectory, attempt-evidence, and qualification contracts.
+- docs/: architecture, deployment, failure, and security contracts.
 
-## Components
+## Execution path
 
-- `action.yml`: rotating frontier worker.
-- `seal/action.yml`: trusted qualification/sealing action.
-- `admit/action.yml`: model-free canonical admission.
-- `scripts/trajectory.sh`: isolated cross-run ownership ledger with atomic CAS.
-- `scripts/select-frontier.py`: deterministic GitHub issue/PR reconstruction.
-- `scripts/worker.sh`: bounded credential-stripped OpenCode execution.
-- `scripts/publish.sh` and `scripts/publish.py`: trusted candidate reconstruction, commit, ref, and PR mutation.
-- `scripts/seal.py`: qualification manifest generation.
-- `scripts/admit.py`: exact-SHA evidence/check/path verification and canonical CAS.
-- `templates/`: ready-to-copy target-repository files pinned to an immutable implementation commit.
-- `schemas/`: machine-readable trajectory, attempt, and qualification contracts.
-- `tests/`: deterministic state-machine and policy tests.
+1. A scheduled/manual frontier workflow starts from canonical main.
+2. The wrapper obtains a global lease with Git force-with-lease CAS.
+3. It reconstructs the current trajectory from open opencode/issue-* PRs or the deterministic ready-for-agent issue frontier.
+4. It fetches issue/PR context before model execution.
+5. GitHub credentials are removed and GitHub command files are replaced with disposable decoys.
+6. Strict CargoWall starts.
+7. A fresh pinned OpenCode process runs for a bounded interval.
+8. The model can modify candidate files but cannot become the GitHub mutation authority.
+9. The wrapper checks HEAD, conflicts, protected paths, control-action integrity, and a lightweight deterministic command.
+10. Trusted wrapper code commits and updates one persistent issue branch with force-with-lease, then creates/updates one PR.
+11. Candidate validation runs independently with Nix + Dagger, Zizmor, and Trivy.
+12. A trusted seal job checks out the validated candidate's original canonical base, generates qualification evidence, and signs it with Cosign from the canonical Nix environment.
+13. Admission verifies the Sigstore workflow identity, candidate SHA, PR head, original base SHA, required check runs, ancestry, and protected paths.
+14. Canonical main advances only by a fast-forward force-with-lease update from the qualified base to the exact qualified candidate SHA.
 
-## Pinned OpenCode
+If any identity or state changed, admission rejects and the next worker reconstructs from GitHub.
 
-The worker intentionally does not use the floating `anomalyco/opencode/github@latest` wrapper as its production trust anchor.
+## OpenCode pin
 
-Default OpenCode release: `v1.18.35`.
+The worker defaults to OpenCode v1.18.35.
 
 Linux x64 asset SHA-256:
 
-`c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d`
+    c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d
 
-The runtime invokes `opencode run --format json`; the NDJSON stream is retained as attributable attempt evidence.
+The upstream anomalyco/opencode/github@latest wrapper is intentionally not the production trust anchor. The repository uses the non-interactive OpenCode CLI directly and captures --format json events as evidence.
 
-## Target-repository contract
+## Target repository contract
 
-A target repository supplies project semantics and validation: `AGENTS.md`, `CONTEXT.md`, ADRs where appropriate, a locked Nix environment, a Dagger module exposing `dagger call validate`, deterministic tests, and protected canonical state.
+The target repository must provide a canonical main, GitHub Issues with ready-for-agent, deterministic tests, flake.nix + flake.lock, and a Dagger module exposing:
 
-Install the files under `templates/`, configure model/provider access, and create a dedicated admission credential unavailable to the OpenCode worker. Exact deployment steps are in `docs/DEPLOYMENT.md`.
+    dagger call validate
 
-## Security boundary
+The trusted canonical Nix dev shell must provide both dagger and cosign. Candidate validation executes nix develop --no-write-lock-file --command dagger call validate; seal/admission use the same canonical Nix environment for Cosign.
 
-OpenCode permissions are defense in depth, not the isolation boundary. The worker has no GitHub credential; CargoWall constrains egress; control-plane paths are denied by policy and rechecked deterministically; privileged Git work uses fresh isolated repositories and trusted scripts; canonical admission is model-free and CAS-protected.
+Copy:
 
-See `docs/SECURITY.md` and `docs/FAILURE-MODEL.md`.
+- templates/frontier.yml -> .github/workflows/opencode-frontier.yml
+- templates/candidate-validation.yml -> .github/workflows/opencode-candidate-validation.yml
+- templates/admit.yml -> .github/workflows/opencode-admit.yml
+- templates/frontier.md -> .github/opencode/frontier.md
+- templates/opencode.json -> opencode.json
+- templates/harden-runtime.js -> .opencode/plugins/harden-runtime.js
+- templates/protected-paths.txt -> .opencode-actions/protected-paths.txt
 
-## Deliberately absent
+All Samwise-x/opencode-actions references in the final handoff templates are pinned to immutable implementation commit 23a6bf960b4ad104a2a237d48e3ba1a15619f250.
 
-No `STATUS.md`. No `HANDOFF.md`. No model-authored journal. No session persistence requirement. No second truth store.
+## Required GitHub configuration
 
-Persist the trajectory, not the OpenCode process.
+Repository secrets:
+
+- OPENCODE_API_KEY: example template uses OpenCode Zen. Replace provider secret/environment if another provider is selected.
+- ADMISSION_TOKEN: dedicated GitHub App installation token or equivalent credential authorized to update the canonical branch and close the accepted issue. Do not expose it to worker or candidate-validation jobs.
+
+Repository variables:
+
+- OPENCODE_MODEL: for example opencode/gpt-5.6-sol.
+- OPENCODE_ALLOWED_HOSTS: newline-separated CargoWall egress destinations required by the selected provider and any prevalidation command.
+
+Canonical branch rules should reject direct ordinary writes and require the deterministic and security checks for ordinary PRs. The dedicated admission identity must be narrowly permitted to perform the final fast-forward update; worker credentials must not have that bypass.
+
+## CargoWall posture
+
+Probabilistic execution is fail-closed:
+
+    mode: enforce
+    offline: true
+    fail-on-unsupported: true
+    sudo-lockdown: true
+
+Candidate Dagger validation runs in a separate read-only/no-secret job because CargoWall sudo lockdown deliberately removes Docker-group access. Qualification and admission are trusted jobs, execute no candidate code, and use strict CargoWall.
+
+## State ownership
+
+The coordination ref stores only a lease/version and last transition identifiers. It is not a cognitive handoff.
+
+The actual handoff is reconstructable from:
+
+    GitHub Issues + PRs + canonical Git history + candidate refs + exact-SHA CI + signed evidence
+
+No STATUS.md, HANDOFF.md, agent diary, model summary, or persisted OpenCode session is needed.
+
+## First deployment test
+
+Before enabling the schedule, manually dispatch one issue and prove all of the following: the model sees no GitHub write credential; one persistent issue branch/PR is produced; failed checks block qualification; changing candidate HEAD invalidates old evidence; moving main invalidates old qualification; overlapping workers cannot both own the trajectory; protected control-plane changes are rejected; and final admission lands exactly the qualified SHA or does nothing.
+
+See docs/DEPLOYMENT.md for the cutover sequence and docs/SECURITY.md for the trust boundary.

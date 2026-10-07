@@ -2,10 +2,19 @@
 set -euo pipefail
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY required}"
 server="${GITHUB_SERVER_URL:-https://github.com}"
-safe_hooks="${RUNNER_TEMP:-/tmp}/opencode-empty-hooks"
-mkdir -p "$safe_hooks"
-for key in core.hooksPath credential.helper http.proxy https.proxy http.https://github.com/.extraheader; do
-  /usr/bin/git config --local --unset-all "$key" 2>/dev/null || true
-done
-/usr/bin/git config --local core.hooksPath "$safe_hooks"
-/usr/bin/git remote set-url origin "${server}/${GITHUB_REPOSITORY}.git"
+[[ -d .git ]] || { echo "expected a normal Git checkout with .git directory" >&2; exit 73; }
+
+# Model execution may write local Git configuration through arbitrary shell code.
+# Privileged phases therefore do not try to clean individual keys. They replace
+# the local config with a minimal known-good transport configuration.
+cat > .git/config <<EOF
+[core]
+    repositoryformatversion = 0
+    filemode = true
+    bare = false
+    logallrefupdates = true
+    hooksPath = /dev/null
+[remote "origin"]
+    url = ${server}/${GITHUB_REPOSITORY}.git
+    fetch = +refs/heads/*:refs/remotes/origin/*
+EOF

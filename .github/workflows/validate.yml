@@ -1,64 +1,100 @@
 name: validate
+
 on:
   pull_request:
   push:
     branches: [main]
+
 permissions:
   contents: read
+
 concurrency:
   group: validate-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   test:
     name: test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
       - name: CargoWall
-        uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414
+        uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414 # v1.3.7
         with:
           mode: enforce
           offline: true
           fail-on-unsupported: true
           sudo-lockdown: true
+
       - name: Syntax and schema sanity
         run: |
           set -euo pipefail
           for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
-          python3 -m py_compile scripts/*.py
-          for f in schemas/*.json; do jq empty "$f"; done
-          ruby -e "require 'yaml'; Dir['action.yml','admit/action.yml','seal/action.yml','templates/*.yml'].each { |f| YAML.load_file(f) }"
+          python3 -m py_compile scripts/*.py tests/*.py
+          for f in schemas/*.json opencode.json; do jq empty "$f"; done
+          ruby -e '
+            require "yaml"
+            files = Dir["*.yml"] + Dir["admit/*.yml"] + Dir["seal/*.yml"] + Dir["templates/*.yml"] + Dir[".github/workflows/*.yml"]
+            files.each { |f| YAML.load_file(f) }
+          '
+
+      - name: Immutable action-reference contract
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'uses:[[:space:]]+[^ ]+@(main|master|latest|v[0-9]+([.][0-9]+)*)[[:space:]]*(#.*)?$'             action.yml admit seal templates .github/workflows; then
+            echo "::error::floating GitHub Action reference found"
+            exit 1
+          fi
+          if grep -R -n '__IMPLEMENTATION_SHA__' templates; then
+            echo "::error::handoff templates still contain unresolved implementation pin"
+            exit 1
+          fi
+
       - name: Static contracts
         run: |
           set -euo pipefail
-          python3 -m json.tool opencode.json >/dev/null
           git diff --check
-      - name: Deterministic state-machine and policy tests
-        run: |
-          bash tests/test-trajectory.sh
-          bash tests/test-protected.sh
+          grep -q '"share": "disabled"' opencode.json
+          grep -q 'force-with-lease' scripts/trajectory.sh
+          grep -q 'force-with-lease' scripts/admit.py
+
+      - name: Trajectory state-machine tests
+        run: bash tests/test-trajectory.sh
+
+      - name: Protected-path tests
+        run: bash tests/test-protected.sh
+
+      - name: Qualification tests
+        run: python3 tests/test-seal.py
 
   security:
     name: security
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
       - name: Trivy
         uses: aquasecurity/trivy-action@c03d123cb480c08c69b054af418ea5e69fe6e57e
         with:
           scan-type: fs
           scan-ref: .
+          scanners: vuln,secret,misconfig
           exit-code: "1"
           severity: HIGH,CRITICAL
           ignore-unfixed: false
+          version: v0.75.0
+
       - name: Zizmor
         uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
         with:
           advanced-security: false
           annotations: true
-          persona: regular
+          persona: auditor
           online-audits: false
+          min-severity: medium
+          version: v1.21.0
