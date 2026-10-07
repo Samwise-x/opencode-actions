@@ -149,6 +149,15 @@ runs:
           sha256sum "$EVIDENCE_DIR/evidence.json" | awk '{print $1}' > "$EVIDENCE_DIR/evidence.sha256"
         fi
 
+    - name: Upload attributable evidence
+      if: ${{ always() && steps.lease.outputs.acquired == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: opencode-evidence-${{ steps.meta.outputs.attempt_id }}
+        path: .opencode-evidence/
+        if-no-files-found: warn
+        retention-days: 90
+
     - name: Finalize trajectory
       if: ${{ steps.lease.outputs.acquired == 'true' && success() }}
       shell: bash
@@ -172,12 +181,3 @@ runs:
         "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
         trap '"$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
         "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           failed || true
-
-    - name: Upload attributable evidence
-      if: ${{ always() && steps.lease.outputs.acquired == 'true' }}
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-      with:
-        name: opencode-evidence-${{ steps.meta.outputs.attempt_id }}
-        path: .opencode-evidence/
-        if-no-files-found: warn
-        retention-days: 90
