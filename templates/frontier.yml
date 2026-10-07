@@ -35,7 +35,7 @@ jobs:
           agent: build
           prompt-file: .github/opencode/frontier.md
           validation-command: git diff --check
-          lease-seconds: "900"
+          lease-seconds: "690"
       - name: Summary
         if: always()
         run: |
