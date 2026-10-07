@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"Trajectory Lease",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["schema_version","trajectory_id","version","expected_base_sha","attempt_id"],
+  "properties":{
+    "schema_version":{"const":1},
+    "trajectory_id":{"type":"string","minLength":1},
+    "version":{"type":"integer","minimum":0},
+    "expected_base_sha":{"type":"string","pattern":"^[0-9a-f]{40}$"},
+    "attempt_id":{"type":"string","minLength":1}
+  }
+}
