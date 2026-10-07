@@ -8,7 +8,9 @@ BRANCH="${TRAJECTORY_BRANCH:-opencode/trajectory}"
 LEASE_SECONDS="${LEASE_SECONDS:-900}"
 REQUIRED_CHECKS="${TRAJECTORY_REQUIRED_CHECKS:-deterministic,security}"
 STATE_FILE="trajectory.json"
-ROOT="$(mktemp -d "${RUNNER_TEMP:-/tmp}/opencode-trajectory.XXXXXX")"
+TMP_PARENT="${RUNNER_TEMP:-/tmp}"
+mkdir -p "$TMP_PARENT"
+ROOT="$(mktemp -d "$TMP_PARENT/opencode-trajectory.XXXXXX")"
 trap 'rm -rf "$ROOT"' EXIT
 REPO="$ROOT/repo"
 
