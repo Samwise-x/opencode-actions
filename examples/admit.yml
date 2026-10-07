@@ -39,6 +39,7 @@ jobs:
 
       # Replace v1 with the immutable commit SHA deployed from this repository.
       - name: Deterministically admit candidate
+        if: steps.evidence.outputs.pr_number != ''
         uses: Samwise-x/opencode-actions/admit@v1
         with:
           pr-number: ${{ steps.evidence.outputs.pr_number }}
