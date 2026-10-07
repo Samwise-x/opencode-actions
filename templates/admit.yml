@@ -41,7 +41,7 @@ jobs:
           run-id: ${{ steps.origin.outputs.run_id }}
 
       - name: Admit exact validated candidate
-        uses: Samwise-x/opencode-actions/admit@62a9c8d81b3afc23cbdb2323246fdf835609278d
+        uses: Samwise-x/opencode-actions/admit@6342c947f60b92dfc8cf50db5315ea5c77cfb701
         with:
           pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
           candidate-sha: ${{ github.event.workflow_run.head_sha }}
