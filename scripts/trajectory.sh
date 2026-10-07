@@ -2,6 +2,7 @@
 set -euo pipefail
 REMOTE="${TRAJECTORY_REMOTE:-origin}"
 BRANCH="${TRAJECTORY_BRANCH:-opencode/trajectory}"
+LEASE_SECONDS="${LEASE_SECONDS:-900}"
 STATE_FILE="trajectory.json"
 WORKTREE="${RUNNER_TEMP:-/tmp}/opencode-trajectory-${GITHUB_RUN_ID:-$$}-${GITHUB_RUN_ATTEMPT:-1}"
 remote_sha() { git ls-remote --heads "$REMOTE" "refs/heads/$BRANCH" | awk '{print $1}'; }
@@ -40,12 +41,19 @@ case "${1:-}" in
     expected="$(init_branch)"
     git fetch -q "$REMOTE" "refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH"
     checkout_state "$expected"
+    now="$(date +%s)"
+    active="$(jq -r '.status == "leased" and (.lease.expires_epoch // 0) > '"$now" "$WORKTREE/$STATE_FILE")"
+    if [[ "$active" == "true" ]]; then
+      jq -n --arg attempt "$(jq -r '.lease.attempt' "$WORKTREE/$STATE_FILE")" --argjson expires "$(jq -r '.lease.expires_epoch' "$WORKTREE/$STATE_FILE")" '{acquired:false,active_attempt:$attempt,expires_epoch:$expires}'
+      exit 0
+    fi
     lease="$(printf '%s:%s:%s' "$attempt_id" "$base_sha" "$expected" | sha256sum | cut -d' ' -f1)"
     version="$(jq -r '.version // 0' "$WORKTREE/$STATE_FILE")"
-    jq --arg lease "$lease" --arg attempt "$attempt_id" --arg base "$base_sha" --arg run "${GITHUB_RUN_ID:-local}" --argjson version "$((version+1))"       '.version=$version | .status="leased" | .lease={token:$lease,attempt:$attempt,base_sha:$base,run_id:$run} | .last_attempt=$attempt'       "$WORKTREE/$STATE_FILE" > "$WORKTREE/$STATE_FILE.tmp"
+    expires="$((now + LEASE_SECONDS))"
+    jq --arg lease "$lease" --arg attempt "$attempt_id" --arg base "$base_sha" --arg run "${GITHUB_RUN_ID:-local}" --argjson version "$((version+1))"       '.version=$version | .status="leased" | .lease={token:$lease,attempt:$attempt,base_sha:$base,run_id:$run,expires_epoch:$expires} | .last_attempt=$attempt'       "$WORKTREE/$STATE_FILE" > "$WORKTREE/$STATE_FILE.tmp"
     mv "$WORKTREE/$STATE_FILE.tmp" "$WORKTREE/$STATE_FILE"
     next="$(commit_and_cas "$expected" "chore(trajectory): acquire $attempt_id")"
-    jq -n --arg token "$lease" --arg trajectory "$next" --arg branch "$BRANCH" '{lease_token:$token,trajectory_sha:$trajectory,branch:$branch}'
+    jq -n --arg token "$lease" --arg trajectory "$next" --arg branch "$BRANCH" '{acquired:true,lease_token:$token,trajectory_sha:$trajectory,branch:$branch}'
     ;;
   finalize)
     expected="${2:?trajectory sha required}"; lease="${3:?lease token required}"; status="${4:?status required}"
