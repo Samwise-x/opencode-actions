@@ -42,7 +42,7 @@ case "${1:-}" in
     git fetch -q "$REMOTE" "refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH"
     checkout_state "$expected"
     now="$(date +%s)"
-    active="$(jq -r '.status == "leased" and (.lease.expires_epoch // 0) > '"$now" "$WORKTREE/$STATE_FILE")"
+    active="$(jq -r --argjson now "$now" '.status == "leased" and (.lease.expires_epoch // 0) > $now' "$WORKTREE/$STATE_FILE")"
     if [[ "$active" == "true" ]]; then
       jq -n --arg attempt "$(jq -r '.lease.attempt' "$WORKTREE/$STATE_FILE")" --argjson expires "$(jq -r '.lease.expires_epoch' "$WORKTREE/$STATE_FILE")" '{acquired:false,active_attempt:$attempt,expires_epoch:$expires}'
       exit 0
@@ -50,7 +50,9 @@ case "${1:-}" in
     lease="$(printf '%s:%s:%s' "$attempt_id" "$base_sha" "$expected" | sha256sum | cut -d' ' -f1)"
     version="$(jq -r '.version // 0' "$WORKTREE/$STATE_FILE")"
     expires="$((now + LEASE_SECONDS))"
-    jq --arg lease "$lease" --arg attempt "$attempt_id" --arg base "$base_sha" --arg run "${GITHUB_RUN_ID:-local}" --argjson version "$((version+1))"       '.version=$version | .status="leased" | .lease={token:$lease,attempt:$attempt,base_sha:$base,run_id:$run,expires_epoch:$expires} | .last_attempt=$attempt'       "$WORKTREE/$STATE_FILE" > "$WORKTREE/$STATE_FILE.tmp"
+    jq --arg lease "$lease" --arg attempt "$attempt_id" --arg base "$base_sha" --arg run "${GITHUB_RUN_ID:-local}" --argjson version "$((version+1))" --argjson expires "$expires" \
+      '.version=$version | .status="leased" | .lease={token:$lease,attempt:$attempt,base_sha:$base,run_id:$run,expires_epoch:$expires} | .last_attempt=$attempt' \
+      "$WORKTREE/$STATE_FILE" > "$WORKTREE/$STATE_FILE.tmp"
     mv "$WORKTREE/$STATE_FILE.tmp" "$WORKTREE/$STATE_FILE"
     next="$(commit_and_cas "$expected" "chore(trajectory): acquire $attempt_id")"
     jq -n --arg token "$lease" --arg trajectory "$next" --arg branch "$BRANCH" '{acquired:true,lease_token:$token,trajectory_sha:$trajectory,branch:$branch}'
