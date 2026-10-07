@@ -1,0 +1,28 @@
+name: validate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Syntax
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
+      - name: Trajectory state-machine tests
+        run: bash tests/test-trajectory.sh
+      - name: Zizmor
+        uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
+        with:
+          advanced-security: false
+          annotations: true
+          persona: pedantic
+          online-audits: false
