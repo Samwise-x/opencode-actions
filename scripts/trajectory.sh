@@ -15,7 +15,7 @@ REPO="$ROOT/repo"
 gitx() { /usr/bin/git -C "$REPO" "$@"; }
 
 auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | /usr/bin/base64 -w0)"
-remote="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git"
+remote="${TRAJECTORY_REMOTE_URL:-${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git}"
 mkdir -p "$REPO"
 /usr/bin/git init -q "$REPO"
 gitx config core.hooksPath /dev/null
