@@ -1,0 +1,50 @@
+name: OpenCode Admission
+on:
+  workflow_run:
+    workflows: ["OpenCode Candidate Validation"]
+    types: [completed]
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+concurrency:
+  group: opencode-admission-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  admit:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'opencode/attempt/') &&
+      github.event.workflow_run.pull_requests[0].number != null
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Resolve originating frontier run
+        id: origin
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          attempt="${HEAD_BRANCH#opencode/attempt/}"
+          run_id="${attempt%%-*}"
+          test -n "$run_id"
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download immutable frontier evidence
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: opencode-evidence-${{ steps.origin.outputs.attempt }}
+          path: ${{ runner.temp }}/frontier-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.origin.outputs.run_id }}
+
+      - name: Admit exact validated candidate
+        uses: Samwise-x/opencode-actions/admit@eddbf26cf01b162b0646f029dc6c85399c65005a
+        with:
+          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+          candidate-sha: ${{ github.event.workflow_run.head_sha }}
+          evidence-file: ${{ runner.temp }}/frontier-evidence/evidence.json
+          required-checks: deterministic,security
+          merge-method: squash
