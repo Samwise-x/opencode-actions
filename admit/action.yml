@@ -1,0 +1,58 @@
+name: "OpenCode Deterministic Admission"
+description: "Admit one exact validated candidate through its protected pull request"
+inputs:
+  pr-number:
+    description: "Pull request number"
+    required: true
+  candidate-sha:
+    description: "Exact candidate SHA bound to evidence"
+    required: true
+  evidence-file:
+    description: "Downloaded evidence.json path"
+    required: true
+  required-checks:
+    description: "Comma-separated required GitHub check-run names"
+    required: false
+    default: ""
+  merge-method:
+    description: "GitHub merge method: merge, squash, or rebase"
+    required: false
+    default: "squash"
+outputs:
+  result:
+    description: "JSON admission result"
+    value: ${{ steps.admit.outputs.result }}
+runs:
+  using: "composite"
+  steps:
+    - id: admit
+      name: Verify exact-SHA evidence and admit
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        EVIDENCE_FILE: ${{ inputs.evidence-file }}
+        REQUIRED_CHECKS: ${{ inputs.required-checks }}
+        MERGE_METHOD: ${{ inputs.merge-method }}
+      run: |
+        set -euo pipefail
+        args=(
+          --repository "${GITHUB_REPOSITORY}"
+          --pr "${PR_NUMBER}"
+          --candidate-sha "${CANDIDATE_SHA}"
+          --evidence "${EVIDENCE_FILE}"
+          --merge-method "${MERGE_METHOD}"
+        )
+        IFS=',' read -r -a checks <<< "${REQUIRED_CHECKS}"
+        for check in "${checks[@]}"; do
+          check="$(echo "${check}" | xargs)"
+          [[ -z "${check}" ]] || args+=(--required-check "${check}")
+        done
+        result="$(python3 "${{ github.action_path }}/../scripts/admit.py" "${args[@]}")"
+        echo "${result}"
+        {
+          echo "result<<EOF"
+          echo "${result}"
+          echo "EOF"
+        } >> "${GITHUB_OUTPUT}"
