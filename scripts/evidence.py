@@ -43,6 +43,8 @@ def main() -> int:
     create.add_argument("--events", required=True)
     create.add_argument("--stdout", required=True)
     create.add_argument("--stderr", required=True)
+    create.add_argument("--pr-number", default="")
+    create.add_argument("--pr-url", default="")
     args = parser.parse_args()
 
     if args.command != "create":
@@ -67,6 +69,8 @@ def main() -> int:
             "ref": os.environ.get("GITHUB_REF", ""),
             "dirty": args.dirty == "true",
             "tree_sha": git("rev-parse", f"{args.candidate_sha}^{{tree}}"),
+            "pr_number": args.pr_number,
+            "pr_url": args.pr_url,
         },
         "execution": {
             "model": args.model,
