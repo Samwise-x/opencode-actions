@@ -155,9 +155,18 @@ EOF
         STDERR_PATH: ${{ steps.execute.outputs.stderr_path }}
       run: |
         set -euo pipefail
-        path=".opencode-actions/evidence/${ATTEMPT_ID}.manifest.json"
+        path="${RUNNER_TEMP}/opencode-actions/evidence/${ATTEMPT_ID}.manifest.json"
         python3 "${{ github.action_path }}/scripts/evidence.py" create           --output "${path}"           --attempt-id "${ATTEMPT_ID}"           --epoch "${EPOCH}"           --base-sha "${BASE_SHA}"           --candidate-sha "${CANDIDATE_SHA}"           --exit-code "${EXIT_CODE}"           --dirty "${DIRTY}"           --model "${MODEL}"           --agent "${AGENT}"           --events "${EVENTS_PATH}"           --stdout "${STDOUT_PATH}"           --stderr "${STDERR_PATH}"
         echo "path=${path}" >> "${GITHUB_OUTPUT}"
+
+    - name: Upload immutable execution evidence
+      if: always() && steps.acquire.outputs.acquired == 'true'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: opencode-evidence-${{ steps.acquire.outputs.attempt_id }}
+        path: ${{ runner.temp }}/opencode-actions/evidence/
+        if-no-files-found: error
+        retention-days: 90
 
     - name: Finalize trajectory
       if: always() && steps.acquire.outputs.acquired == 'true'
