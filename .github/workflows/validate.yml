@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
+    name: test
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -38,6 +39,7 @@ jobs:
         run: bash tests/test-trajectory.sh
 
   security:
+    name: security
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
