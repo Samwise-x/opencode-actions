@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Samwise-x/opencode-actions/schemas/trajectory-v1.schema.json",
+  "title": "OpenCode Actions Trajectory v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "epoch", "status"],
+  "properties": {
+    "schema": { "const": "opencode-actions/trajectory/v1" },
+    "epoch": { "type": "integer", "minimum": 0 },
+    "status": { "enum": ["idle", "active", "executed", "failed", "validated", "admitted"] },
+    "attempt_id": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "candidate_sha": { "type": "string" },
+    "lease_expires_epoch": { "type": "integer", "minimum": 0 },
+    "lease_expires_at": { "type": "string" },
+    "acquired_at": { "type": "string" },
+    "finalized_at": { "type": "string" },
+    "github": { "type": "object" },
+    "evidence": { "type": "object" },
+    "previous": { "type": "object" }
+  }
+}
