@@ -27,7 +27,7 @@ jobs:
             models.dev
       - name: Run disposable frontier worker
         id: frontier
-        uses: Samwise-x/opencode-actions@62a9c8d81b3afc23cbdb2323246fdf835609278d
+        uses: Samwise-x/opencode-actions@6342c947f60b92dfc8cf50db5315ea5c77cfb701
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:
