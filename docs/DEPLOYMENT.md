@@ -1,32 +1,67 @@
 # Deployment
 
-This is a handoff substrate. Copy it into the target repository after replacing repository-specific validation and provider configuration.
+This repository is a handoff package. The target repository receives the templates and keeps this implementation pinned by immutable commit SHA.
 
-## Required configuration
+## 1. Copy target files
 
-Protect the canonical branch. Agents must not push directly to it.
+- `templates/frontier.yml` -> `.github/workflows/opencode-frontier.yml`
+- `templates/candidate-validation.yml` -> `.github/workflows/opencode-candidate-validation.yml`
+- `templates/admit.yml` -> `.github/workflows/opencode-admit.yml`
+- `templates/frontier.md` -> `.github/opencode/frontier.md`
+- `templates/opencode.json` -> `opencode.json`
+- `templates/protected-paths.txt` -> `.opencode-actions/protected-paths.txt`
 
-Configure provider credentials as GitHub secrets or approved workload identity. Never commit credentials.
+Do not replace immutable action SHAs with floating tags.
 
-Set OPENCODE_MODEL, OPENCODE_AGENT when used, and TRAJECTORY_ID as repository variables.
+## 2. Supply deterministic project validation
 
-## OpenCode
+Commit `flake.nix` and `flake.lock`. The Nix development environment must expose Dagger.
 
-Do not use anomalyco/opencode/github@latest as the production trust anchor. Pin OpenCode deliberately. The audited implementation target is v1.18.35; revalidate its release installation mechanism before unattended execution.
+Provide a Dagger module with a zero-argument `validate` function. It should own formatting, linting, unit/integration tests, build/package validation, and repository-specific deterministic policy.
 
-## CargoWall
+Candidate CI contract:
 
-Required posture:
+`nix develop --no-write-lock-file --command dagger call validate`
 
-    mode: enforce
-    offline: true
-    fail-on-unsupported: true
-    sudo-lockdown: true
+## 3. Configure work state
 
-Allow only destinations required by the selected model provider and deterministic build graph.
+Create the `ready-for-agent` label. Optional understood priorities are `priority:p0` through `priority:p3` plus critical/high/medium/low aliases.
 
-## Acceptance tests
+Only apply `ready-for-agent` after blocking dependencies are resolved.
 
-Before enabling recurrence, manually run a disposable objective; prove the worker cannot mutate main; prove candidate SHA evidence validates; move main and prove stale admission rejects; alter a candidate after evidence and prove rejection; overlap two attempts and prove one admission path; prove CargoWall fails closed; prove failed deterministic checks cannot be overridden.
+## 4. Configure model access
 
-Failure may produce evidence. Failure may not become truth merely because an agent produced it.
+Actions secret: `OPENCODE_API_KEY`.
+
+Actions variable: `OPENCODE_MODEL`.
+
+Actions variable: `OPENCODE_ALLOWED_HOSTS`, newline-separated CargoWall host[:port] entries needed by the model provider or project-specific worker commands.
+
+## 5. Configure admission authority
+
+Create `ADMISSION_TOKEN` as a dedicated GitHub App installation token or equivalent credential exposed only to `.github/workflows/opencode-admit.yml`.
+
+It needs the minimum authority required to update the canonical branch and close the accepted issue. If the canonical ruleset blocks all direct updates, grant bypass only to this admission identity.
+
+The frontier worker identity must not receive ruleset bypass.
+
+## 6. Protect canonical state
+
+Block ordinary direct pushes to `main`. Require `deterministic` and `security` for normal PRs. Keep control-plane files under CODEOWNERS/rulesets where practical.
+
+Automated admission independently rechecks named checks and exact-SHA CAS, so branch protection is defense in depth rather than the only correctness boundary.
+
+## 7. Acceptance test before enabling cron
+
+1. Dispatch one explicit issue.
+2. Confirm one candidate branch/PR is created.
+3. Confirm OpenCode cannot push or call GitHub directly.
+4. Confirm attempt evidence is uploaded.
+5. Confirm deterministic/security jobs run on the exact PR head.
+6. Confirm the seal artifact contains `qualification.json` and a Sigstore bundle.
+7. Move `main` before admission and confirm stale admission rejects.
+8. Move the PR head after qualification and confirm exact-SHA rejection.
+9. Attempt a protected-path edit and confirm publication/admission rejects it.
+10. Overlap two frontier dispatches and confirm one trajectory lease owns execution.
+
+Only after those checks should the five-times-per-hour schedule remain enabled.

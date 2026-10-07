@@ -1,45 +1,60 @@
 # Architecture
 
-OpenCode owns cognition and candidate execution. GitHub owns durable refs, triggers, identities, pull requests, checks, and commit history. Repository policy owns trajectory continuity, evidence qualification, concurrency, and admission.
+## Ownership
 
-## Invariant
+| Concern | Owner |
+| --- | --- |
+| Work definition | GitHub Issues + repository context |
+| Candidate cognition/execution | disposable OpenCode worker |
+| Cross-run serialization | trajectory ref + force-with-lease CAS |
+| Proposed implementation | persistent issue branch + PR |
+| Correctness | deterministic Nix/Dagger + security checks |
+| Qualification | signed exact-SHA manifest |
+| Accepted state | canonical protected ref |
+| Recovery | Git/GitHub canonical state |
 
-OpenCode may mutate candidate state. OpenCode does not decide that candidate state became canonical truth.
+## State machine
 
-No OpenCode session, model context, background task registry, local SQLite database, or runner filesystem is required for recovery.
+`idle -> leased -> validated -> admitted` is the successful path.
 
-## Identity
+`leased -> failed` records failure without advancing canonical state. A lease expires automatically. A candidate awaiting required checks blocks redundant worker execution. A failed candidate remains on its persistent issue branch so the next fresh model can continue from Git state rather than session state.
 
-Every attempt carries trajectory_id, trajectory_version, attempt_id, github_run_id, base_sha, candidate_sha, and the OpenCode session_id when available. The candidate SHA is the evidence join key.
+The trajectory branch contains coordination state only. It never contains implementation code and never replaces Issues/PRs as work state.
 
-## Worker lifecycle
+## Frontier selection
 
-Reconstruct canonical state; acquire single-writer ownership; start a fresh worker; execute bounded work; export evidence bound to the resulting SHA; validate deterministically; revalidate ownership and base; admit with compare-and-swap semantics; terminate.
+The primary trajectory is singular. Existing open `opencode/issue-N` PRs are resumed before new work. Otherwise the selector chooses an open `ready-for-agent` issue ordered by P0/P1/P2/P3 priority and then age/issue number.
 
-## Concurrency and admission
+The persistent issue branch carries implementation continuity across model turnover. The model itself is disposable.
 
-GitHub Actions concurrency is the first overlap barrier. Admission is authoritative.
+## Evidence chain
 
-A candidate is admissible only when the expected canonical base is still current, required evidence names the exact candidate SHA, deterministic checks succeeded for that SHA, and the attempt still owns the expected trajectory version.
+Worker evidence binds attempt, issue, base SHA, model/agent, OpenCode event stream digest, worktree diff digest, prevalidation result, candidate SHA, and PR.
 
-Any mismatch is a stale-worker rejection. Never force the write.
+Candidate CI independently evaluates the exact PR head. The trusted seal job consumes worker evidence and emits a qualification binding repository, base SHA, candidate SHA, issue, PR, attempt, required checks, and the frontier-evidence digest.
 
-Conceptually:
+Cosign signs that qualification with GitHub OIDC. Admission accepts only a signature whose certificate identity corresponds to the target repository's configured validation workflow.
 
-    qualified(candidate_sha, evidence)
-    AND canonical_head == expected_base_sha
-    AND trajectory_version == expected_version
-    THEN compare-and-swap canonical ref
-    ELSE reject and reconstruct
+## Privileged mutation boundary
 
-The final ref update is the serialization point.
+The probabilistic worktree is never trusted as a Git control plane after model execution. Candidate publication reconstructs a fresh Git repository under RUNNER_TEMP, overlays only worktree content while excluding `.git` and evidence internals, reruns protected-path checks, commits there, and pushes with force-with-lease.
 
-## Durable state
+Trajectory acquisition/finalization likewise uses an isolated temporary Git repository. Model-controlled local Git config, hooks, filters, remotes, and object metadata therefore do not become privileged execution inputs.
 
-Derive state from GitHub and Git: CONTEXT.md for domain language; ADRs for irreversible decisions; Issues for work; commits for implementation; candidate refs or PRs for proposed transitions; deterministic checks for correctness; protected main for accepted state; signed digests for releases.
+## Admission
 
-Do not create STATUS.md, HANDOFF.md, CURRENT_TASK.md, agent journals, or model summaries as competing truth.
+Admission requires signed qualification, exact PR-head equality, exact canonical-base equality, successful named checks on the candidate SHA, descendant ancestry, no protected-path changes, and a dedicated admission credential.
 
-## Security boundary
+The final write is:
 
-OpenCode permissions are tool policy, not host isolation. Runner/network containment and GitHub token permissions are separate enforcement layers. Use least-privilege GitHub permissions, immutable action SHAs, CargoWall enforcement, deterministic validation, and scoped/OIDC credentials where available.
+`force-with-lease(canonical_ref, expected=base_sha, new=candidate_sha)`
+
+If canonical state moved, the write fails and the system reconstructs from the new truth.
+
+## Nix and Dagger
+
+Nix fixes the project toolchain/environment. Dagger owns the portable validation graph. Candidate CI calls:
+
+`nix develop --no-write-lock-file --command dagger call validate`
+
+Project-specific checks belong inside that Dagger graph instead of being duplicated into orchestration.

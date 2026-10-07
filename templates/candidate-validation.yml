@@ -122,7 +122,7 @@ jobs:
           persist-credentials: false
 
       - name: Seal exact-SHA qualification
-        uses: Samwise-x/opencode-actions/seal@7ce3019cdb681b0cf7de179f1cd4fad13606a1e9
+        uses: Samwise-x/opencode-actions/seal@e35a6f7de009183db110c1db2c1b067cf00b043e
         with:
           frontier-evidence: ${{ runner.temp }}/frontier-evidence/evidence.json
           candidate-sha: ${{ github.event.pull_request.head.sha }}
