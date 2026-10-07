@@ -66,17 +66,14 @@ def main() -> int:
         raise SystemExit("--repository must be owner/name")
 
     evidence = json.loads(Path(args.evidence).read_text(encoding="utf-8"))
-    if evidence.get("schema") != "opencode-actions/evidence/v1":
+    if evidence.get("schema") != 1:
         raise SystemExit("unsupported evidence schema")
-
-    git = evidence.get("git", {})
-    execution = evidence.get("execution", {})
-    if git.get("candidate_sha") != args.candidate_sha:
+    if evidence.get("candidate_sha") != args.candidate_sha:
         raise SystemExit("evidence candidate SHA does not match requested candidate")
-    if int(execution.get("exit_code", 1)) != 0:
-        raise SystemExit("OpenCode execution did not succeed")
-    if git.get("dirty"):
-        raise SystemExit("evidence reports a dirty worktree; candidate is not a closed Git state")
+    if evidence.get("status") != "validated":
+        raise SystemExit("candidate evidence is not validated")
+    if int(evidence.get("opencode_exit", 1)) != 0 or int(evidence.get("validation_exit", 1)) != 0:
+        raise SystemExit("execution or deterministic validation failed")
 
     owner, repo = args.repository.split("/", 1)
     pr = request("GET", f"/repos/{owner}/{repo}/pulls/{args.pr}", token)
@@ -91,9 +88,9 @@ def main() -> int:
         raise SystemExit("PR has no base ref")
     base = request("GET", f"/repos/{owner}/{repo}/git/ref/heads/{base_ref}", token)
     current_base_sha = base.get("object", {}).get("sha")
-    if current_base_sha != git.get("base_sha"):
+    if current_base_sha != evidence.get("base_sha"):
         raise SystemExit(
-            f"canonical base moved: evidence={git.get('base_sha')} current={current_base_sha}; revalidate"
+            f"canonical base moved: evidence={evidence.get('base_sha')} current={current_base_sha}; revalidate"
         )
 
     checks = request(
@@ -110,7 +107,7 @@ def main() -> int:
         if not runs:
             raise SystemExit(f"required check missing: {required}")
         latest = max(runs, key=lambda x: x.get("completed_at") or x.get("started_at") or "")
-        if latest.get("status") != "completed" or latest.get("conclusion") not in ("success", "neutral", "skipped"):
+        if latest.get("status") != "completed" or latest.get("conclusion") != "success":
             raise SystemExit(
                 f"required check not successful: {required}: "
                 f"{latest.get('status')}/{latest.get('conclusion')}"
