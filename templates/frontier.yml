@@ -1,0 +1,68 @@
+name: OpenCode Frontier
+
+on:
+  schedule:
+    - cron: "0,12,24,36,48 * * * *"
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional issue number to force for this pass.
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  issues: read
+  pull-requests: write
+
+concurrency:
+  group: opencode-frontier-${{ github.repository_id }}
+  cancel-in-progress: false
+
+jobs:
+  frontier:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Run disposable frontier worker
+        id: frontier
+        uses: Samwise-x/opencode-actions@23a6bf960b4ad104a2a237d48e3ba1a15619f250
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: ${{ vars.OPENCODE_MODEL }}
+          agent: build
+          issue-number: ${{ inputs.issue_number }}
+          prompt-file: .github/opencode/frontier.md
+          validation-command: git diff --check
+          protected-paths-file: .opencode-actions/protected-paths.txt
+          trajectory-branch: opencode/trajectory
+          branch-prefix: opencode/issue-
+          required-checks: deterministic,security
+          lease-seconds: "690"
+          worker-seconds: "540"
+          allowed-hosts: ${{ vars.OPENCODE_ALLOWED_HOSTS }}
+
+      - name: Summary
+        if: always()
+        env:
+          ACQUIRED: ${{ steps.frontier.outputs.acquired }}
+          REASON: ${{ steps.frontier.outputs.reason }}
+          ATTEMPT: ${{ steps.frontier.outputs.attempt-id }}
+          ISSUE: ${{ steps.frontier.outputs.issue-number }}
+          BASE: ${{ steps.frontier.outputs.base-sha }}
+          CANDIDATE: ${{ steps.frontier.outputs.candidate-sha }}
+          PR: ${{ steps.frontier.outputs.pr-url }}
+        run: |
+          {
+            echo "### OpenCode frontier"
+            echo "- acquired: $ACQUIRED"
+            echo "- reason: $REASON"
+            echo "- attempt: $ATTEMPT"
+            echo "- issue: $ISSUE"
+            echo "- base: `$BASE`"
+            echo "- candidate: `$CANDIDATE`"
+            echo "- PR: $PR"
+          } >> "$GITHUB_STEP_SUMMARY"

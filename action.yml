@@ -1,0 +1,357 @@
+name: OpenCode Frontier Worker
+description: Single-writer rotating OpenCode worker with deterministic GitHub handoff and SHA-bound evidence.
+branding:
+  icon: cpu
+  color: orange
+
+inputs:
+  model:
+    description: OpenCode provider/model identifier.
+    required: true
+  agent:
+    description: Repository-defined OpenCode primary agent.
+    required: false
+    default: build
+  issue-number:
+    description: Optional explicit issue number. Empty reconstructs the current frontier.
+    required: false
+    default: ""
+  prompt-file:
+    description: Repository-relative worker policy/prompt prefix.
+    required: false
+    default: .github/opencode/frontier.md
+  validation-command:
+    description: Lightweight deterministic pre-publish command.
+    required: false
+    default: git diff --check
+  protected-paths-file:
+    description: Canonical file listing paths the autonomous worker may not modify.
+    required: false
+    default: .opencode-actions/protected-paths.txt
+  trajectory-branch:
+    description: Dedicated Git branch carrying only coordination lease/state.
+    required: false
+    default: opencode/trajectory
+  branch-prefix:
+    description: Persistent candidate branch prefix.
+    required: false
+    default: opencode/issue-
+  required-checks:
+    description: Comma-separated qualification check names used to decide whether a prior candidate is pending, failed, or admitted.
+    required: false
+    default: deterministic,security
+  lease-seconds:
+    description: Lease lifetime.
+    required: false
+    default: "690"
+  worker-seconds:
+    description: Maximum OpenCode runtime inside the lease.
+    required: false
+    default: "540"
+  allowed-hosts:
+    description: Additional CargoWall host[:port] entries required by the selected model/provider and local build commands.
+    required: false
+    default: ""
+  opencode-version:
+    description: Pinned OpenCode release version.
+    required: false
+    default: 1.18.35
+  opencode-linux-x64-sha256:
+    description: SHA-256 of pinned OpenCode Linux x64 release asset.
+    required: false
+    default: c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d
+  opencode-linux-arm64-sha256:
+    description: SHA-256 of pinned OpenCode Linux arm64 release asset.
+    required: false
+    default: f7f2ba59ee8aa94d388f9696575a32d20e71c2ee48def9f80fc693a60fec6c72
+
+outputs:
+  acquired:
+    value: ${{ steps.lease.outputs.acquired }}
+  reason:
+    value: ${{ steps.lease.outputs.reason }}
+  attempt-id:
+    value: ${{ steps.meta.outputs.attempt_id }}
+  base-sha:
+    value: ${{ steps.meta.outputs.base_sha }}
+  issue-number:
+    value: ${{ steps.frontier.outputs.issue_number }}
+  candidate-sha:
+    value: ${{ steps.publish.outputs.candidate_sha }}
+  pr-number:
+    value: ${{ steps.publish.outputs.pr_number }}
+  pr-url:
+    value: ${{ steps.publish.outputs.pr_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout caller repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - id: meta
+      name: Establish immutable attempt identity
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$RUNNER_OS" = Linux
+        base_sha="$(/usr/bin/git rev-parse HEAD)"
+        attempt_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+        echo "attempt_id=$attempt_id" >> "$GITHUB_OUTPUT"
+
+    - id: integrity
+      name: Pin loaded automation bytes
+      shell: bash
+      run: |
+        set -euo pipefail
+        digest="$(find "$GITHUB_ACTION_PATH" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+        echo "action_digest=$digest" >> "$GITHUB_OUTPUT"
+
+    - name: Install pinned OpenCode
+      shell: bash
+      env:
+        OPENCODE_VERSION: ${{ inputs.opencode-version }}
+        OPENCODE_X64_SHA256: ${{ inputs.opencode-linux-x64-sha256 }}
+        OPENCODE_ARM64_SHA256: ${{ inputs.opencode-linux-arm64-sha256 }}
+      run: /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/install-opencode.sh" "$OPENCODE_VERSION" "$OPENCODE_X64_SHA256" "$OPENCODE_ARM64_SHA256"
+
+    - id: lease
+      name: Acquire trajectory lease
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_REQUIRED_CHECKS: ${{ inputs.required-checks }}
+        LEASE_SECONDS: ${{ inputs.lease-seconds }}
+        BASE_SHA: ${{ steps.meta.outputs.base_sha }}
+        ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
+      run: |
+        set -euo pipefail
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        lease_json="$(/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "$BASE_SHA" "$ATTEMPT_ID")"
+        echo "$lease_json" | /usr/bin/jq .
+        echo "acquired=$(/usr/bin/jq -r .acquired <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+        echo "reason=$(/usr/bin/jq -r '.reason // ""' <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+        if [[ "$(/usr/bin/jq -r .acquired <<<"$lease_json")" == "true" ]]; then
+          echo "lease_token=$(/usr/bin/jq -r .lease_token <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+          echo "trajectory_sha=$(/usr/bin/jq -r .trajectory_sha <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+        fi
+
+    - id: frontier
+      name: Reconstruct current frontier
+      if: ${{ steps.lease.outputs.acquired == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPLICIT_ISSUE: ${{ inputs.issue-number }}
+        BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        BRANCH_PREFIX: ${{ inputs.branch-prefix }}
+      run: |
+        set -euo pipefail
+        /usr/bin/python3 "$GITHUB_ACTION_PATH/scripts/select-frontier.py"           --base "$BASE_BRANCH"           --branch-prefix "$BRANCH_PREFIX"           --issue "$EXPLICIT_ISSUE"           --output "$RUNNER_TEMP/opencode-frontier.json"           --github-output "$GITHUB_OUTPUT"
+
+    - id: prepare
+      name: Prepare persistent candidate branch
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        CANDIDATE_BRANCH: ${{ steps.frontier.outputs.branch }}
+      run: |
+        set -euo pipefail
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        /usr/bin/git fetch --prune --no-tags origin "$BASE_BRANCH"
+        remote_head="$(/usr/bin/git ls-remote --heads origin "refs/heads/$CANDIDATE_BRANCH" | /usr/bin/awk '{print $1}')"
+        merge_conflict=false
+        if [[ -n "$remote_head" ]]; then
+          /usr/bin/git fetch --no-tags origin "$CANDIDATE_BRANCH"
+          /usr/bin/git checkout -B "$CANDIDATE_BRANCH" "origin/$CANDIDATE_BRANCH"
+          set +e
+          /usr/bin/git merge --no-commit --no-ff "origin/$BASE_BRANCH"
+          merge_rc=$?
+          set -e
+          if [[ $merge_rc -ne 0 ]]; then merge_conflict=true; fi
+        else
+          /usr/bin/git checkout -B "$CANDIDATE_BRANCH" "origin/$BASE_BRANCH"
+        fi
+        echo "remote_head=$remote_head" >> "$GITHUB_OUTPUT"
+        echo "prepared_head=$(/usr/bin/git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "merge_conflict=$merge_conflict" >> "$GITHUB_OUTPUT"
+
+    - name: Assert GitHub credential removed before model execution
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if /usr/bin/git config --local --get-all http.https://github.com/.extraheader >/dev/null 2>&1; then
+          echo "::error::GitHub credential header remained configured"
+          exit 70
+        fi
+
+    - name: Start CargoWall containment
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414 # v1.3.7
+      with:
+        mode: enforce
+        offline: true
+        fail-on-unsupported: true
+        sudo-lockdown: true
+        allowed-hosts: |
+          opencode.ai:443
+          models.dev:443
+          ${{ inputs.allowed-hosts }}
+
+    - id: execute
+      name: Execute disposable OpenCode worker
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+        AGENT: ${{ inputs.agent }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        SELECTION_FILE: ${{ runner.temp }}/opencode-frontier.json
+        PROTECTED_PATHS_FILE: ${{ inputs.protected-paths-file }}
+        VALIDATION_COMMAND: ${{ inputs.validation-command }}
+        ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
+        BASE_SHA: ${{ steps.meta.outputs.base_sha }}
+        PREPARED_HEAD: ${{ steps.prepare.outputs.prepared_head }}
+        MERGE_CONFLICT: ${{ steps.prepare.outputs.merge_conflict }}
+        WORKER_SECONDS: ${{ inputs.worker-seconds }}
+        EVIDENCE_DIR: .opencode-evidence
+        OCA_ACTION_ROOT: ${{ github.action_path }}
+        GH_TOKEN: ""
+        GITHUB_TOKEN: ""
+        GITHUB_ENV: ${{ runner.temp }}/opencode-decoy-env
+        GITHUB_PATH: ${{ runner.temp }}/opencode-decoy-path
+        GITHUB_OUTPUT: ${{ runner.temp }}/opencode-decoy-output
+        GITHUB_STATE: ${{ runner.temp }}/opencode-decoy-state
+        GITHUB_STEP_SUMMARY: ${{ runner.temp }}/opencode-decoy-summary
+      run: /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/worker.sh"
+
+    - name: Revalidate automation bytes after model execution
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      shell: bash
+      env:
+        EXPECTED: ${{ steps.integrity.outputs.action_digest }}
+      run: |
+        set -euo pipefail
+        actual="$(find "$GITHUB_ACTION_PATH" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+        test "$actual" = "$EXPECTED" || { echo "::error::automation action bytes changed during model execution"; exit 71; }
+
+    - id: publish
+      name: Publish candidate and PR
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' && success() }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
+        BASE_SHA: ${{ steps.meta.outputs.base_sha }}
+        ISSUE_NUMBER: ${{ steps.frontier.outputs.issue_number }}
+        ISSUE_TITLE: ${{ steps.frontier.outputs.issue_title }}
+        CANDIDATE_BRANCH: ${{ steps.frontier.outputs.branch }}
+        EXPECTED_REMOTE_HEAD: ${{ steps.prepare.outputs.remote_head }}
+        EVIDENCE_DIR: .opencode-evidence
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        OCA_ACTION_ROOT: ${{ github.action_path }}
+        HOME: ${{ runner.temp }}/opencode-privileged-home
+        GIT_CONFIG_GLOBAL: /dev/null
+        GIT_CONFIG_SYSTEM: /dev/null
+        PATH: /usr/bin:/bin
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME"
+        /usr/bin/bash "$OCA_ACTION_ROOT/scripts/sanitize-git.sh"
+        /usr/bin/bash "$OCA_ACTION_ROOT/scripts/git-auth.sh" enable
+        trap '/usr/bin/bash "$OCA_ACTION_ROOT/scripts/git-auth.sh" disable' EXIT
+        candidate="$(/usr/bin/bash "$OCA_ACTION_ROOT/scripts/publish.sh")"
+        echo "candidate_sha=$candidate" >> "$GITHUB_OUTPUT"
+        if [[ "$candidate" == "$BASE_SHA" ]]; then
+          echo "pr_number=" >> "$GITHUB_OUTPUT"
+          echo "pr_url=" >> "$GITHUB_OUTPUT"
+        else
+          /usr/bin/python3 "$OCA_ACTION_ROOT/scripts/publish.py"             --head "$CANDIDATE_BRANCH" --base "$DEFAULT_BRANCH"             --issue "$ISSUE_NUMBER" --title "agent: #$ISSUE_NUMBER $ISSUE_TITLE"             --attempt "$ATTEMPT_ID" --base-sha "$BASE_SHA" --candidate-sha "$candidate"             --output "$GITHUB_OUTPUT"
+          pr_number="$(grep '^pr_number=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          pr_url="$(grep '^pr_url=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          /usr/bin/jq --arg pr_number "$pr_number" --arg pr_url "$pr_url"             '.pr_number=($pr_number|tonumber) | .pr_url=$pr_url'             "$EVIDENCE_DIR/evidence.json" > "$EVIDENCE_DIR/evidence.tmp"
+          mv "$EVIDENCE_DIR/evidence.tmp" "$EVIDENCE_DIR/evidence.json"
+          /usr/bin/sha256sum "$EVIDENCE_DIR/evidence.json" | /usr/bin/awk '{print $1}' > "$EVIDENCE_DIR/evidence.sha256"
+        fi
+
+    - name: Upload attributable attempt evidence
+      if: ${{ always() && steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: opencode-evidence-${{ steps.meta.outputs.attempt_id }}
+        path: .opencode-evidence/
+        if-no-files-found: warn
+        retention-days: 90
+
+    - name: Finalize published trajectory state
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' && success() }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_SHA: ${{ steps.lease.outputs.trajectory_sha }}
+        LEASE_TOKEN: ${{ steps.lease.outputs.lease_token }}
+        CANDIDATE_SHA: ${{ steps.publish.outputs.candidate_sha }}
+        ISSUE_NUMBER: ${{ steps.frontier.outputs.issue_number }}
+        PR_NUMBER: ${{ steps.publish.outputs.pr_number }}
+        ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
+        HOME: ${{ runner.temp }}/opencode-privileged-home
+        GIT_CONFIG_GLOBAL: /dev/null
+        GIT_CONFIG_SYSTEM: /dev/null
+        PATH: /usr/bin:/bin
+      run: |
+        set -euo pipefail
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "$TRAJECTORY_SHA" "$LEASE_TOKEN" validated "$CANDIDATE_SHA"           "artifact:opencode-evidence-$ATTEMPT_ID" "$ISSUE_NUMBER" "$PR_NUMBER"
+
+    - name: Finalize idle trajectory state
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'idle' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_SHA: ${{ steps.lease.outputs.trajectory_sha }}
+        LEASE_TOKEN: ${{ steps.lease.outputs.lease_token }}
+        HOME: ${{ runner.temp }}/opencode-privileged-home
+        GIT_CONFIG_GLOBAL: /dev/null
+        GIT_CONFIG_SYSTEM: /dev/null
+        PATH: /usr/bin:/bin
+      run: |
+        set -euo pipefail
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
+        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "$TRAJECTORY_SHA" "$LEASE_TOKEN" idle
+
+    - name: Release failed trajectory lease
+      if: ${{ failure() && steps.lease.outputs.acquired == 'true' && steps.lease.outputs.trajectory_sha != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_SHA: ${{ steps.lease.outputs.trajectory_sha }}
+        LEASE_TOKEN: ${{ steps.lease.outputs.lease_token }}
+        HOME: ${{ runner.temp }}/opencode-privileged-home
+        GIT_CONFIG_GLOBAL: /dev/null
+        GIT_CONFIG_SYSTEM: /dev/null
+        PATH: /usr/bin:/bin
+      run: |
+        set -euo pipefail
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh" || true
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable || true
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "$TRAJECTORY_SHA" "$LEASE_TOKEN" failed || true
+        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable || true

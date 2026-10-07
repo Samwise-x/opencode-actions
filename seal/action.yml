@@ -1,0 +1,94 @@
+name: Seal OpenCode qualification
+description: Produce and keylessly sign exact-SHA qualification evidence after deterministic validation succeeds.
+
+inputs:
+  frontier-evidence:
+    description: Downloaded worker evidence.json.
+    required: true
+  candidate-sha:
+    required: true
+  pr-number:
+    required: true
+  required-checks:
+    required: false
+    default: deterministic,security
+  allowed-hosts:
+    required: false
+    default: ""
+
+outputs:
+  qualification-path:
+    value: ${{ steps.paths.outputs.qualification }}
+  bundle-path:
+    value: ${{ steps.paths.outputs.bundle }}
+  artifact-name:
+    value: ${{ steps.paths.outputs.artifact }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Determinate Nix
+      uses: DeterminateSystems/determinate-nix-action@e9bfc9148566ca239aef4f5cb968674de15c3c20 # v3.5.2
+
+    - name: Start CargoWall for trusted sealing
+      uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414 # v1.3.7
+      with:
+        mode: enforce
+        offline: true
+        fail-on-unsupported: true
+        sudo-lockdown: true
+        allowed-hosts: |
+          cache.nixos.org:443
+          fulcio.sigstore.dev:443
+          rekor.sigstore.dev:443
+          tuf-repo-cdn.sigstore.dev:443
+          ${{ inputs.allowed-hosts }}
+
+    - id: paths
+      name: Build qualification manifest
+      shell: bash
+      env:
+        FRONTIER_EVIDENCE: ${{ inputs.frontier-evidence }}
+        CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        REQUIRED_CHECKS: ${{ inputs.required-checks }}
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/opencode-qualified"
+        mkdir -p "$out"
+        qualification="$out/qualification.json"
+        bundle="$out/qualification.sigstore.json"
+        args=(
+          --frontier-evidence "$FRONTIER_EVIDENCE"
+          --candidate "$CANDIDATE_SHA"
+          --pr "$PR_NUMBER"
+          --output "$qualification"
+        )
+        IFS=',' read -r -a checks <<< "$REQUIRED_CHECKS"
+        for check in "${checks[@]}"; do
+          check="$(echo "$check" | xargs)"
+          [[ -z "$check" ]] || args+=(--required-check "$check")
+        done
+        /usr/bin/python3 "$GITHUB_ACTION_PATH/../scripts/seal.py" "${args[@]}"
+        echo "qualification=$qualification" >> "$GITHUB_OUTPUT"
+        echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+        echo "artifact=opencode-qualified-$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Keylessly sign qualification with Cosign from trusted Nix environment
+      shell: bash
+      env:
+        QUALIFICATION: ${{ steps.paths.outputs.qualification }}
+        BUNDLE: ${{ steps.paths.outputs.bundle }}
+      run: |
+        set -euo pipefail
+        nix develop --no-write-lock-file --command           cosign sign-blob --yes --bundle "$BUNDLE" "$QUALIFICATION"
+
+    - name: Upload sealed qualification
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: ${{ steps.paths.outputs.artifact }}
+        path: |
+          ${{ steps.paths.outputs.qualification }}
+          ${{ steps.paths.outputs.bundle }}
+        if-no-files-found: error
+        retention-days: 90
