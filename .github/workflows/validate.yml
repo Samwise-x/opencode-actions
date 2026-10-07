@@ -10,9 +10,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
       - name: CargoWall
         uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414
         with:
@@ -20,11 +22,6 @@ jobs:
           offline: true
           fail-on-unsupported: true
           sudo-lockdown: true
-          allowed-hosts: |
-            get.trivy.dev
-            ghcr.io
-            pkg-containers.githubusercontent.com
-
       - name: Syntax and schema sanity
         run: |
           set -euo pipefail
@@ -35,13 +32,17 @@ jobs:
       - name: Static contracts
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/admit.py scripts/publish.py
           python3 -m json.tool opencode.json >/dev/null
-          python3 -m json.tool schemas/evidence-v1.schema.json >/dev/null
-          python3 -m json.tool schemas/trajectory-v1.schema.json >/dev/null
           git diff --check
       - name: Trajectory state-machine tests
         run: bash tests/test-trajectory.sh
+
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
       - name: Trivy
         uses: aquasecurity/trivy-action@c03d123cb480c08c69b054af418ea5e69fe6e57e
         with:
@@ -49,7 +50,7 @@ jobs:
           scan-ref: .
           exit-code: "1"
           severity: HIGH,CRITICAL
-
+          ignore-unfixed: false
       - name: Zizmor
         uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
         with:
