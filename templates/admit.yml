@@ -4,6 +4,9 @@ on:
   workflow_run:
     workflows: ["OpenCode Candidate Validation"]
     types: [completed]
+  schedule:
+    - cron: "6,18,30,42,54 * * * *"
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -18,34 +21,81 @@ concurrency:
 
 jobs:
   admit:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'opencode/issue-') &&
-      github.event.workflow_run.pull_requests[0].number != null
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Resolve candidate needing admission
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          WR_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WR_RUN_ID: ${{ github.event.workflow_run.id }}
+          WR_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          eligible=false
+          candidate=""
+          pr=""
+          run_id=""
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            if [[ "$WR_CONCLUSION" == "success" && -n "$WR_HEAD_SHA" && -n "$WR_PR" ]]; then
+              candidate="$WR_HEAD_SHA"
+              pr="$WR_PR"
+              run_id="$WR_RUN_ID"
+              eligible=true
+            fi
+          else
+            set +e
+            encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/trajectory.json?ref=opencode/trajectory" --jq .content 2>/dev/null)"
+            rc=$?
+            set -e
+            if [[ $rc -eq 0 && -n "$encoded" ]]; then
+              state="$(printf '%s' "$encoded" | base64 -d)"
+              status="$(jq -r '.status // ""' <<<"$state")"
+              candidate="$(jq -r '.last_candidate // ""' <<<"$state")"
+              pr="$(jq -r '.last_pr // ""' <<<"$state")"
+              if [[ "$status" == "validated" && -n "$candidate" && -n "$pr" ]]; then
+                current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+                if [[ "$current" != "$candidate" ]]; then
+                  run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/opencode-candidate-validation.yml/runs?head_sha=$candidate&status=success&per_page=20" --jq '.workflow_runs[0].id // empty')"
+                  [[ -n "$run_id" ]] && eligible=true
+                fi
+              fi
+            fi
+          fi
+
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
       - name: Checkout current canonical branch
+        if: ${{ steps.resolve.outputs.eligible == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download sealed qualification from validation run
+      - name: Download sealed qualification
+        if: ${{ steps.resolve.outputs.eligible == 'true' }}
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: opencode-qualified-${{ github.event.workflow_run.head_sha }}
+          name: opencode-qualified-${{ steps.resolve.outputs.candidate }}
           path: ${{ runner.temp }}/qualified
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
 
       - name: Admit exact candidate with deterministic CAS
-        uses: Samwise-x/opencode-actions/admit@23a6bf960b4ad104a2a237d48e3ba1a15619f250
+        if: ${{ steps.resolve.outputs.eligible == 'true' }}
+        uses: Samwise-x/opencode-actions/admit@caa4756ccd14ee820d4a0cb0b476889088ad8412
         with:
-          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
-          candidate-sha: ${{ github.event.workflow_run.head_sha }}
+          pr-number: ${{ steps.resolve.outputs.pr }}
+          candidate-sha: ${{ steps.resolve.outputs.candidate }}
           qualification-file: ${{ runner.temp }}/qualified/qualification.json
           bundle-file: ${{ runner.temp }}/qualified/qualification.sigstore.json
           protected-paths-file: .opencode-actions/protected-paths.txt

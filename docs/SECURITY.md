@@ -34,7 +34,7 @@ Do not collapse these credentials into one job or one long-lived token.
 
 The model subprocess has GH_TOKEN and GITHUB_TOKEN removed; GitHub command-file environment variables redirected to decoys; strict CargoWall enforcement, offline policy mode, fail-on-unsupported, and sudo lockdown; OpenCode question/web network/external-directory permissions denied; a runtime plugin that blanks secret-like environment variables for shell tools and blocks direct GitHub/Git mutation commands; protected-path checks; HEAD/conflict checks; bounded runtime; and post-run process cleanup.
 
-These controls reduce model authority. They do not make model output trustworthy. Trust is conferred only by deterministic qualification plus admission.
+Privileged candidate publication and trajectory mutation are reconstructed in fresh temporary Git repositories rather than trusting model-controlled `.git` metadata. These controls reduce model authority. They do not make model output trustworthy. Trust is conferred only by deterministic qualification plus admission.
 
 ## Supply-chain pins
 
@@ -42,7 +42,7 @@ Production templates pin third-party GitHub Actions to immutable commit SHAs.
 
 OpenCode is downloaded from a fixed release asset and SHA-256 verified before execution.
 
-The target flake.lock owns the reproducible Dagger/Cosign/project toolchain. Workflows use --no-write-lock-file; CI may not silently mutate it.
+The target `flake.lock` owns the reproducible Dagger/project validation toolchain. Qualification and admission obtain Cosign from exact nixpkgs revision `2833a4f2f08058f980a143c9fb447953ef15f1cb`. Workflows use `--no-write-lock-file`; CI may not silently mutate project lock state.
 
 ## Network
 

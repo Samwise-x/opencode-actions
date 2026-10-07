@@ -1,8 +1,8 @@
 const secretName = /(TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|ACCESS_KEY|PRIVATE_KEY|AUTH)/i
 
 const forbidden = [
-  /(^|[;&|()]\s*)gh\s/i,
-  /(^|[;&|()]\s*)git\s+(push|commit|reset|clean|checkout|switch|rebase|merge|config|remote)\b/i,
+  /(^|[;&|()]\s*)(?:command\s+)?(?:\/(?:usr\/)?bin\/)?gh\s/i,
+  /(^|[;&|()]\s*)(?:command\s+)?(?:\/(?:usr\/)?bin\/)?git\s+(push|commit|reset|clean|checkout|switch|rebase|merge|config|remote)\b/i,
   /(^|[;&|()]\s*)sudo\s/i,
   /(^|[;&|()]\s*)(nohup|setsid|crontab|systemctl)\s/i,
 ]

@@ -131,9 +131,6 @@ runs:
         ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
       run: |
         set -euo pipefail
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
         lease_json="$(/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "$BASE_SHA" "$ATTEMPT_ID")"
         echo "$lease_json" | /usr/bin/jq .
         echo "acquired=$(/usr/bin/jq -r .acquired <<<"$lease_json")" >> "$GITHUB_OUTPUT"
@@ -197,6 +194,17 @@ runs:
           exit 70
         fi
 
+    - id: policy
+      name: Pin repository-owned protected-path policy
+      if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
+      shell: bash
+      env:
+        POLICY: ${{ inputs.protected-paths-file }}
+      run: |
+        set -euo pipefail
+        test -f "$POLICY"
+        echo "sha=$(/usr/bin/sha256sum "$POLICY" | /usr/bin/awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
     - name: Start CargoWall containment
       if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
       uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414 # v1.3.7
@@ -226,7 +234,7 @@ runs:
         PREPARED_HEAD: ${{ steps.prepare.outputs.prepared_head }}
         MERGE_CONFLICT: ${{ steps.prepare.outputs.merge_conflict }}
         WORKER_SECONDS: ${{ inputs.worker-seconds }}
-        EVIDENCE_DIR: .opencode-evidence
+        EVIDENCE_DIR: ${{ runner.temp }}/opencode-evidence
         OCA_ACTION_ROOT: ${{ github.action_path }}
         GH_TOKEN: ""
         GITHUB_TOKEN: ""
@@ -237,15 +245,19 @@ runs:
         GITHUB_STEP_SUMMARY: ${{ runner.temp }}/opencode-decoy-summary
       run: /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/worker.sh"
 
-    - name: Revalidate automation bytes after model execution
+    - name: Revalidate automation and policy bytes after model execution
       if: ${{ steps.lease.outputs.acquired == 'true' && steps.frontier.outputs.status == 'work' }}
       shell: bash
       env:
-        EXPECTED: ${{ steps.integrity.outputs.action_digest }}
+        EXPECTED_ACTION: ${{ steps.integrity.outputs.action_digest }}
+        POLICY: ${{ inputs.protected-paths-file }}
+        EXPECTED_POLICY: ${{ steps.policy.outputs.sha }}
       run: |
         set -euo pipefail
-        actual="$(find "$GITHUB_ACTION_PATH" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
-        test "$actual" = "$EXPECTED" || { echo "::error::automation action bytes changed during model execution"; exit 71; }
+        actual_action="$(find "$GITHUB_ACTION_PATH" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+        test "$actual_action" = "$EXPECTED_ACTION" || { echo "::error::automation action bytes changed during model execution"; exit 71; }
+        actual_policy="$(/usr/bin/sha256sum "$POLICY" | /usr/bin/awk '{print $1}')"
+        test "$actual_policy" = "$EXPECTED_POLICY" || { echo "::error::protected-path policy changed during model execution"; exit 72; }
 
     - id: publish
       name: Publish candidate and PR
@@ -259,9 +271,10 @@ runs:
         ISSUE_TITLE: ${{ steps.frontier.outputs.issue_title }}
         CANDIDATE_BRANCH: ${{ steps.frontier.outputs.branch }}
         EXPECTED_REMOTE_HEAD: ${{ steps.prepare.outputs.remote_head }}
-        EVIDENCE_DIR: .opencode-evidence
+        EVIDENCE_DIR: ${{ runner.temp }}/opencode-evidence
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         OCA_ACTION_ROOT: ${{ github.action_path }}
+        PROTECTED_PATHS_FILE: ${{ inputs.protected-paths-file }}
         HOME: ${{ runner.temp }}/opencode-privileged-home
         GIT_CONFIG_GLOBAL: /dev/null
         GIT_CONFIG_SYSTEM: /dev/null
@@ -269,9 +282,6 @@ runs:
       run: |
         set -euo pipefail
         mkdir -p "$HOME"
-        /usr/bin/bash "$OCA_ACTION_ROOT/scripts/sanitize-git.sh"
-        /usr/bin/bash "$OCA_ACTION_ROOT/scripts/git-auth.sh" enable
-        trap '/usr/bin/bash "$OCA_ACTION_ROOT/scripts/git-auth.sh" disable' EXIT
         candidate="$(/usr/bin/bash "$OCA_ACTION_ROOT/scripts/publish.sh")"
         echo "candidate_sha=$candidate" >> "$GITHUB_OUTPUT"
         if [[ "$candidate" == "$BASE_SHA" ]]; then
@@ -291,7 +301,7 @@ runs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: opencode-evidence-${{ steps.meta.outputs.attempt_id }}
-        path: .opencode-evidence/
+        path: ${{ runner.temp }}/opencode-evidence/
         if-no-files-found: warn
         retention-days: 90
 
@@ -313,9 +323,6 @@ runs:
         PATH: /usr/bin:/bin
       run: |
         set -euo pipefail
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
         /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "$TRAJECTORY_SHA" "$LEASE_TOKEN" validated "$CANDIDATE_SHA"           "artifact:opencode-evidence-$ATTEMPT_ID" "$ISSUE_NUMBER" "$PR_NUMBER"
 
     - name: Finalize idle trajectory state
@@ -332,9 +339,6 @@ runs:
         PATH: /usr/bin:/bin
       run: |
         set -euo pipefail
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh"
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
-        trap '/usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
         /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "$TRAJECTORY_SHA" "$LEASE_TOKEN" idle
 
     - name: Release failed trajectory lease
@@ -351,7 +355,4 @@ runs:
         PATH: /usr/bin:/bin
       run: |
         set -euo pipefail
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/sanitize-git.sh" || true
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable || true
         /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "$TRAJECTORY_SHA" "$LEASE_TOKEN" failed || true
-        /usr/bin/bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable || true

@@ -8,6 +8,7 @@ WORKER_SECONDS="${WORKER_SECONDS:-540}"; OUT="${EVIDENCE_DIR:-.opencode-evidence
 [[ "$(/usr/bin/git rev-parse HEAD)" == "$PREPARED" ]] || { echo "prepared HEAD moved before model" >&2; exit 67; }
 mkdir -p "$OUT"; prompt="$OUT/prompt.txt"; events="$OUT/opencode.ndjson"; stderr="$OUT/opencode.stderr"; vlog="$OUT/prepublish-validation.log"
 start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+issue="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["issue"]["number"])' "$SELECTION_FILE")"
 {
   cat "$PROMPT_FILE"
   printf '\n\n<deterministic_frontier_context>\n'; cat "$SELECTION_FILE"; printf '\n</deterministic_frontier_context>\n'
@@ -25,7 +26,7 @@ POLICY
 baseline="$OUT/processes.before"; after="$OUT/processes.after"
 /usr/bin/ps -u "$(/usr/bin/id -u)" -o pid= | /usr/bin/awk '{$1=$1;print}' | sort -n > "$baseline"
 set +e
-env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_ACTION_PATH -u OCA_ACTION_ROOT   /usr/bin/timeout --signal=TERM --kill-after=15s "$WORKER_SECONDS"   opencode run --format json --model "$MODEL" --agent "$AGENT" "$(cat "$prompt")" >"$events" 2>"$stderr"
+env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_ACTION_PATH -u OCA_ACTION_ROOT -u RUNNER_TEMP -u EVIDENCE_DIR -u SELECTION_FILE   /usr/bin/timeout --signal=TERM --kill-after=15s "$WORKER_SECONDS"   opencode run --format json --model "$MODEL" --agent "$AGENT" "$(cat "$prompt")" >"$events" 2>"$stderr"
 oc_status=$?
 set -e
 /usr/bin/ps -u "$(/usr/bin/id -u)" -o pid= | /usr/bin/awk '{$1=$1;print}' | sort -n > "$after"
@@ -34,6 +35,7 @@ set -e
   /bin/kill -TERM "$pid" 2>/dev/null || true
 done
 /bin/sleep 1
+/usr/bin/ps -u "$(/usr/bin/id -u)" -o pid= | /usr/bin/awk '{$1=$1;print}' | sort -n > "$after"
 /usr/bin/comm -13 "$baseline" "$after" | while read -r pid; do
   [[ -z "$pid" || "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
   /bin/kill -KILL "$pid" 2>/dev/null || true
@@ -55,7 +57,6 @@ set +e
 validation_status=$?
 set -e
 /usr/bin/git diff --binary "$BASE" > "$OUT/worktree.diff"; /usr/bin/git status --porcelain=v1 > "$OUT/status.txt"
-issue="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["issue"]["number"])' "$SELECTION_FILE")"
 sessions="$(/usr/bin/jq -r 'select(.sessionID != null) | .sessionID' "$events" 2>/dev/null | sort -u | /usr/bin/jq -R -s 'split("\n") | map(select(length>0))')"
 events_sha="$(/usr/bin/sha256sum "$events" | /usr/bin/awk '{print $1}')"; diff_sha="$(/usr/bin/sha256sum "$OUT/worktree.diff" | /usr/bin/awk '{print $1}')"
 validation_sha="$(/usr/bin/sha256sum "$vlog" | /usr/bin/awk '{print $1}')"
