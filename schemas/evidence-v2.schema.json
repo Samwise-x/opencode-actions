@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Samwise-x/opencode-actions/schemas/evidence-v2.schema.json",
+  "title": "OpenCode worker attempt evidence v2",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema",
+    "kind",
+    "attempt_id",
+    "base_sha",
+    "model",
+    "agent",
+    "status",
+    "opencode_exit",
+    "started_at",
+    "ended_at"
+  ],
+  "properties": {
+    "schema": { "const": 2 },
+    "kind": { "const": "agent-attempt" },
+    "attempt_id": { "type": "string", "minLength": 3 },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "candidate_branch": { "type": "string" },
+    "pr_number": { "type": "integer", "minimum": 1 },
+    "pr_url": { "type": "string" },
+    "model": { "type": "string", "minLength": 1 },
+    "agent": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["opencode_failed", "validation_failed", "prevalidated"] },
+    "opencode_exit": { "type": "integer" },
+    "validation_exit": { "type": "integer" },
+    "session_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "opencode_ndjson_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "worktree_diff_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "validation_log_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" }
+  }
+}

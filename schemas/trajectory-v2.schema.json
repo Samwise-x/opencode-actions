@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Samwise-x/opencode-actions/schemas/trajectory-v2.schema.json",
+  "title": "OpenCode trajectory coordination state v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "status",
+    "lease",
+    "last_attempt",
+    "last_base",
+    "last_candidate",
+    "last_evidence",
+    "last_issue",
+    "last_pr"
+  ],
+  "properties": {
+    "schema": { "const": 2 },
+    "version": { "type": "integer", "minimum": 0 },
+    "status": { "enum": ["idle", "leased", "validated", "failed", "admitted"] },
+    "lease": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["token", "attempt", "base_sha", "run_id", "expires_epoch"],
+          "properties": {
+            "token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "attempt": { "type": "string" },
+            "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "run_id": { "type": "string" },
+            "expires_epoch": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "last_attempt": { "type": ["string", "null"] },
+    "last_base": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "last_candidate": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "last_evidence": { "type": ["string", "null"] },
+    "last_issue": { "type": ["integer", "null"], "minimum": 1 },
+    "last_pr": { "type": ["integer", "null"], "minimum": 1 }
+  }
+}

@@ -1,0 +1,17 @@
+# The handoff repository's own autonomous control plane.
+.github/workflows/**
+.opencode-actions/**
+.opencode/plugins/**
+action.yml
+admit/**
+seal/**
+scripts/**
+templates/**
+schemas/**
+opencode.json
+AGENTS.md
+CONTEXT.md
+docs/ARCHITECTURE.md
+docs/DEPLOYMENT.md
+docs/FAILURE-MODEL.md
+docs/SECURITY.md

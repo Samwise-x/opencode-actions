@@ -1,0 +1,62 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "permission": {
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "edit": {
+      "*": "allow",
+      ".git/**": "deny",
+      ".github/workflows/opencode-*.yml": "deny",
+      ".opencode-actions/**": "deny",
+      ".opencode/plugins/**": "deny",
+      "opencode.json": "deny",
+      "opencode.jsonc": "deny",
+      "AGENTS.md": "deny",
+      "CONTEXT.md": "deny",
+      "docs/adr/**": "deny",
+      "flake.nix": "deny",
+      "flake.lock": "deny",
+      "dagger.json": "deny",
+      "dagger/**": "deny"
+    },
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "bash": {
+      "*": "allow",
+      "gh *": "deny",
+      "git push*": "deny",
+      "git commit*": "deny",
+      "git reset*": "deny",
+      "git clean*": "deny",
+      "git checkout*": "deny",
+      "git switch*": "deny",
+      "git rebase*": "deny",
+      "git merge*": "deny",
+      "git config*": "deny",
+      "git remote*": "deny",
+      "sudo *": "deny",
+      "nohup *": "deny",
+      "setsid *": "deny",
+      "crontab *": "deny",
+      "systemctl *": "deny",
+      "printenv*": "deny",
+      "env": "deny",
+      "env *": "deny"
+    },
+    "task": "allow",
+    "external_directory": "deny",
+    "todowrite": "allow",
+    "question": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "lsp": "allow",
+    "doom_loop": "deny",
+    "skill": "allow"
+  }
+}

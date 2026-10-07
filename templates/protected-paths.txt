@@ -1,0 +1,18 @@
+# Autonomous workers may not modify the canonical control plane.
+.github/workflows/opencode-frontier.yml
+.github/workflows/opencode-candidate-validation.yml
+.github/workflows/opencode-admit.yml
+.opencode-actions/**
+.opencode/plugins/**
+opencode.json
+opencode.jsonc
+AGENTS.md
+CONTEXT.md
+docs/adr/**
+flake.nix
+flake.lock
+dagger.json
+dagger/**
+.zizmor.yml
+.trivyignore
+.trivyignore.yaml

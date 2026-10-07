@@ -1,0 +1,101 @@
+name: OpenCode Canonical Admission
+description: Verify signed exact-SHA qualification and atomically fast-forward canonical state with compare-and-swap.
+
+inputs:
+  pr-number:
+    required: true
+  candidate-sha:
+    required: true
+  qualification-file:
+    required: true
+  bundle-file:
+    required: true
+  protected-paths-file:
+    required: false
+    default: .opencode-actions/protected-paths.txt
+  required-checks:
+    required: false
+    default: deterministic,security
+  validation-workflow:
+    required: false
+    default: .github/workflows/opencode-candidate-validation.yml
+  token:
+    description: Dedicated admission token/App credential authorized to update canonical ref and close the issue.
+    required: true
+  allowed-hosts:
+    required: false
+    default: ""
+
+outputs:
+  result:
+    value: ${{ steps.admit.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Determinate Nix
+      uses: DeterminateSystems/determinate-nix-action@e9bfc9148566ca239aef4f5cb968674de15c3c20 # v3.5.2
+
+    - name: Start CargoWall for trusted admission
+      uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414 # v1.3.7
+      with:
+        mode: enforce
+        offline: true
+        fail-on-unsupported: true
+        sudo-lockdown: true
+        allowed-hosts: |
+          cache.nixos.org:443
+          fulcio.sigstore.dev:443
+          rekor.sigstore.dev:443
+          tuf-repo-cdn.sigstore.dev:443
+          ${{ inputs.allowed-hosts }}
+
+    - name: Verify Sigstore workflow identity
+      shell: bash
+      env:
+        QUALIFICATION: ${{ inputs.qualification-file }}
+        BUNDLE: ${{ inputs.bundle-file }}
+        WORKFLOW_PATH: ${{ inputs.validation-workflow }}
+      run: |
+        set -euo pipefail
+        repo_re="$(printf '%s' "$GITHUB_REPOSITORY" | sed 's/[][(){}.^$*+?|\\]/\\&/g')"
+        workflow_re="$(printf '%s' "$WORKFLOW_PATH" | sed 's/[][(){}.^$*+?|\\]/\\&/g')"
+        identity="^https://github.com/${repo_re}/${workflow_re}@refs/.*$"
+        nix develop --no-write-lock-file --command           cosign verify-blob             --bundle "$BUNDLE"             --certificate-identity-regexp "$identity"             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"             "$QUALIFICATION"
+
+    - id: admit
+      name: Exact-SHA compare-and-swap admission
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        QUALIFICATION_FILE: ${{ inputs.qualification-file }}
+        PROTECTED_PATHS_FILE: ${{ inputs.protected-paths-file }}
+        REQUIRED_CHECKS: ${{ inputs.required-checks }}
+        HOME: ${{ runner.temp }}/opencode-admission-home
+        GIT_CONFIG_GLOBAL: /dev/null
+        GIT_CONFIG_SYSTEM: /dev/null
+        PATH: /usr/bin:/bin
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME"
+        args=(
+          --repository "$GITHUB_REPOSITORY"
+          --pr "$PR_NUMBER"
+          --candidate-sha "$CANDIDATE_SHA"
+          --qualification "$QUALIFICATION_FILE"
+          --protected-paths "$PROTECTED_PATHS_FILE"
+        )
+        IFS=',' read -r -a checks <<< "$REQUIRED_CHECKS"
+        for check in "${checks[@]}"; do
+          check="$(echo "$check" | xargs)"
+          [[ -z "$check" ]] || args+=(--required-check "$check")
+        done
+        result="$(/usr/bin/python3 "$GITHUB_ACTION_PATH/../scripts/admit.py" "${args[@]}")"
+        echo "$result"
+        {
+          echo "result<<EOF"
+          echo "$result"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"

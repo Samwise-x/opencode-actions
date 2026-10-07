@@ -1,0 +1,130 @@
+name: OpenCode Candidate Validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencode-candidate-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic:
+    name: deterministic
+    if: startsWith(github.head_ref, 'opencode/issue-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Determinate Nix
+        uses: DeterminateSystems/determinate-nix-action@e9bfc9148566ca239aef4f5cb968674de15c3c20 # v3.5.2
+
+      - name: Canonical Nix + Dagger graph
+        run: nix develop --no-write-lock-file --command dagger call validate
+
+  security:
+    name: security
+    if: startsWith(github.head_ref, 'opencode/issue-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Zizmor
+        uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
+        with:
+          advanced-security: false
+          annotations: true
+          online-audits: false
+          persona: auditor
+          min-severity: medium
+          version: v1.21.0
+
+      - name: Trivy filesystem/dependency/security scan
+        uses: aquasecurity/trivy-action@c03d123cb480c08c69b054af418ea5e69fe6e57e
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: table
+          exit-code: "1"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+          version: v0.75.0
+
+  seal:
+    name: seal
+    if: startsWith(github.head_ref, 'opencode/issue-')
+    needs: [deterministic, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Resolve originating worker attempt
+        id: origin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          message="$(gh api "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA" --jq .commit.message)"
+          attempt="$(sed -n 's/^OpenCode-Attempt: //p' <<<"$message" | tail -1)"
+          test -n "$attempt"
+          run_id="${attempt%%-*}"
+          test -n "$run_id"
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download immutable worker evidence
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: opencode-evidence-${{ steps.origin.outputs.attempt }}
+          path: ${{ runner.temp }}/frontier-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.origin.outputs.run_id }}
+
+      - name: Resolve trusted base
+        id: base
+        env:
+          EVIDENCE: ${{ runner.temp }}/frontier-evidence/evidence.json
+          EXPECTED_CANDIDATE: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          candidate="$(jq -r .candidate_sha "$EVIDENCE")"
+          test "$candidate" = "$EXPECTED_CANDIDATE"
+          base="$(jq -r .base_sha "$EVIDENCE")"
+          test "$base" != null
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted canonical base for Nix toolchain
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Seal exact-SHA qualification
+        uses: Samwise-x/opencode-actions/seal@__IMPLEMENTATION_SHA__
+        with:
+          frontier-evidence: ${{ runner.temp }}/frontier-evidence/evidence.json
+          candidate-sha: ${{ github.event.pull_request.head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          required-checks: deterministic,security
