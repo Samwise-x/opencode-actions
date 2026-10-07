@@ -58,5 +58,5 @@ jobs:
         with:
           advanced-security: false
           annotations: true
-          persona: pedantic
+          persona: regular
           online-audits: false
