@@ -71,10 +71,10 @@ runs:
 
     - name: Install pinned OpenCode
       shell: bash
-      run: >-
-        bash "$GITHUB_ACTION_PATH/scripts/install-opencode.sh"
-        "${{ inputs.opencode-version }}"
-        "${{ inputs.opencode-linux-x64-sha256 }}"
+      env:
+        OPENCODE_VERSION: ${{ inputs.opencode-version }}
+        OPENCODE_ASSET_SHA256: ${{ inputs.opencode-linux-x64-sha256 }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/install-opencode.sh" "$OPENCODE_VERSION" "$OPENCODE_ASSET_SHA256"
 
     - id: lease
       name: Acquire trajectory lease
@@ -83,11 +83,13 @@ runs:
         GH_TOKEN: ${{ github.token }}
         TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
         LEASE_SECONDS: ${{ inputs.lease-seconds }}
+        BASE_SHA: ${{ steps.meta.outputs.base_sha }}
+        ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
       run: |
         set -euo pipefail
         bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
         trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        lease_json="$(bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "${{ steps.meta.outputs.base_sha }}" "${{ steps.meta.outputs.attempt_id }}")"
+        lease_json="$(bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "$BASE_SHA" "$ATTEMPT_ID")"
         echo "$lease_json" | jq .
         acquired="$(jq -r .acquired <<<"$lease_json")"
         echo "acquired=$acquired" >> "$GITHUB_OUTPUT"
@@ -128,6 +130,7 @@ runs:
         ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
         BASE_SHA: ${{ steps.meta.outputs.base_sha }}
         EVIDENCE_DIR: .opencode-evidence
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         set -euo pipefail
         bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
@@ -139,7 +142,7 @@ runs:
           echo "pr_number=" >> "$GITHUB_OUTPUT"
           echo "pr_url=" >> "$GITHUB_OUTPUT"
         else
-          default_branch="${{ github.event.repository.default_branch }}"
+          default_branch="$DEFAULT_BRANCH"
           branch_name="opencode/attempt/${ATTEMPT_ID}"
           python3 "$GITHUB_ACTION_PATH/scripts/publish.py"             --head "$branch_name"             --base "$default_branch"             --title "OpenCode frontier: ${ATTEMPT_ID}"             --body "Validated candidate from trajectory attempt ${ATTEMPT_ID}. Canonical admission is performed separately."             --output "$GITHUB_OUTPUT"
           pr_number="$(grep '^pr_number=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
@@ -164,11 +167,15 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_SHA: ${{ steps.lease.outputs.trajectory_sha }}
+        LEASE_TOKEN: ${{ steps.lease.outputs.lease_token }}
+        CANDIDATE_SHA: ${{ steps.publish.outputs.candidate_sha }}
+        ATTEMPT_ID: ${{ steps.meta.outputs.attempt_id }}
       run: |
         set -euo pipefail
         bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
         trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           validated           "${{ steps.publish.outputs.candidate_sha }}"           "artifact:opencode-evidence-${{ steps.meta.outputs.attempt_id }}"
+        bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize "$TRAJECTORY_SHA" "$LEASE_TOKEN" validated "$CANDIDATE_SHA" "artifact:opencode-evidence-$ATTEMPT_ID"
 
     - name: Release failed trajectory lease
       if: ${{ failure() && steps.lease.outputs.acquired == 'true' && steps.lease.outputs.trajectory_sha != '' }}
@@ -176,8 +183,10 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_SHA: ${{ steps.lease.outputs.trajectory_sha }}
+        LEASE_TOKEN: ${{ steps.lease.outputs.lease_token }}
       run: |
         set -euo pipefail
         bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
         trap 'bash "$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
-        bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           failed || true
+        bash "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize "$TRAJECTORY_SHA" "$LEASE_TOKEN" failed || true
