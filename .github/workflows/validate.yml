@@ -2,7 +2,7 @@ name: validate
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, implementation/production-v1]
 permissions:
   contents: read
 concurrency:
