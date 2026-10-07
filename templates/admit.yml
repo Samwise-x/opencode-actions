@@ -42,7 +42,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Admit exact candidate with deterministic CAS
-        uses: Samwise-x/opencode-actions/admit@__IMPLEMENTATION_SHA__
+        uses: Samwise-x/opencode-actions/admit@23a6bf960b4ad104a2a237d48e3ba1a15619f250
         with:
           pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
           candidate-sha: ${{ github.event.workflow_run.head_sha }}

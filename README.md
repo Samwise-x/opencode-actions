@@ -71,7 +71,7 @@ Copy:
 - templates/harden-runtime.js -> .opencode/plugins/harden-runtime.js
 - templates/protected-paths.txt -> .opencode-actions/protected-paths.txt
 
-All Samwise-x/opencode-actions references in the final handoff templates are pinned to the immutable implementation commit.
+All Samwise-x/opencode-actions references in the final handoff templates are pinned to immutable implementation commit 23a6bf960b4ad104a2a237d48e3ba1a15619f250.
 
 ## Required GitHub configuration
 
