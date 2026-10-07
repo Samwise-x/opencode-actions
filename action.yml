@@ -22,6 +22,10 @@ inputs:
     description: Dedicated Git branch carrying the trajectory lease/state.
     required: false
     default: opencode/trajectory
+  lease-seconds:
+    description: Lease lifetime; must exceed the intended frontier runtime.
+    required: false
+    default: "900"
   opencode-version:
     description: Pinned OpenCode release version.
     required: false
@@ -31,6 +35,8 @@ inputs:
     required: false
     default: c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d
 outputs:
+  acquired:
+    value: ${{ steps.lease.outputs.acquired }}
   attempt-id:
     value: ${{ steps.meta.outputs.attempt_id }}
   base-sha:
@@ -72,16 +78,22 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        LEASE_SECONDS: ${{ inputs.lease-seconds }}
       run: |
         set -euo pipefail
         "$GITHUB_ACTION_PATH/scripts/git-auth.sh" enable
         trap '"$GITHUB_ACTION_PATH/scripts/git-auth.sh" disable' EXIT
         lease_json="$("$GITHUB_ACTION_PATH/scripts/trajectory.sh" acquire "${{ steps.meta.outputs.base_sha }}" "${{ steps.meta.outputs.attempt_id }}")"
         echo "$lease_json" | jq .
-        echo "lease_token=$(jq -r .lease_token <<<"$lease_json")" >> "$GITHUB_OUTPUT"
-        echo "trajectory_sha=$(jq -r .trajectory_sha <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+        acquired="$(jq -r .acquired <<<"$lease_json")"
+        echo "acquired=$acquired" >> "$GITHUB_OUTPUT"
+        if [[ "$acquired" == "true" ]]; then
+          echo "lease_token=$(jq -r .lease_token <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+          echo "trajectory_sha=$(jq -r .trajectory_sha <<<"$lease_json")" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Assert model receives no GitHub write credential
+      if: ${{ steps.lease.outputs.acquired == 'true' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -92,6 +104,7 @@ runs:
 
     - id: execute
       name: Execute and deterministically validate frontier pass
+      if: ${{ steps.lease.outputs.acquired == 'true' }}
       shell: bash
       env:
         MODEL: ${{ inputs.model }}
@@ -104,6 +117,7 @@ runs:
 
     - id: publish
       name: Publish validated candidate
+      if: ${{ steps.lease.outputs.acquired == 'true' && success() }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -118,7 +132,7 @@ runs:
         echo "candidate_sha=$candidate" >> "$GITHUB_OUTPUT"
 
     - name: Finalize trajectory
-      if: ${{ success() }}
+      if: ${{ steps.lease.outputs.acquired == 'true' && success() }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -130,7 +144,7 @@ runs:
         "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           validated           "${{ steps.publish.outputs.candidate_sha }}"           "artifact:opencode-evidence-${{ steps.meta.outputs.attempt_id }}"
 
     - name: Release failed trajectory lease
-      if: ${{ failure() && steps.lease.outputs.trajectory_sha != '' }}
+      if: ${{ failure() && steps.lease.outputs.acquired == 'true' && steps.lease.outputs.trajectory_sha != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -142,7 +156,7 @@ runs:
         "$GITHUB_ACTION_PATH/scripts/trajectory.sh" finalize           "${{ steps.lease.outputs.trajectory_sha }}"           "${{ steps.lease.outputs.lease_token }}"           failed || true
 
     - name: Upload attributable evidence
-      if: ${{ always() }}
+      if: ${{ always() && steps.lease.outputs.acquired == 'true' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: opencode-evidence-${{ steps.meta.outputs.attempt_id }}
