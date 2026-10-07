@@ -11,6 +11,8 @@
     "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "candidate_branch": { "type": "string" },
+    "pr_number": { "type": "string" },
+    "pr_url": { "type": "string" },
     "model": { "type": "string" },
     "agent": { "type": "string" },
     "status": { "enum": ["opencode_failed", "validation_failed", "validated"] },
