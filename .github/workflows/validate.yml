@@ -29,14 +29,16 @@ jobs:
           for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
           python3 -m py_compile scripts/*.py
           for f in schemas/*.json; do jq empty "$f"; done
-          ruby -e "require 'yaml'; YAML.load_file('action.yml'); YAML.load_file('admit/action.yml')"
+          ruby -e "require 'yaml'; Dir['action.yml','admit/action.yml','seal/action.yml','templates/*.yml'].each { |f| YAML.load_file(f) }"
       - name: Static contracts
         run: |
           set -euo pipefail
           python3 -m json.tool opencode.json >/dev/null
           git diff --check
-      - name: Trajectory state-machine tests
-        run: bash tests/test-trajectory.sh
+      - name: Deterministic state-machine and policy tests
+        run: |
+          bash tests/test-trajectory.sh
+          bash tests/test-protected.sh
 
   security:
     name: security

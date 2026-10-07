@@ -61,7 +61,7 @@ runs:
         repo_re="$(printf '%s' "$GITHUB_REPOSITORY" | sed 's/[][(){}.^$*+?|\\]/\\&/g')"
         workflow_re="$(printf '%s' "$WORKFLOW_PATH" | sed 's/[][(){}.^$*+?|\\]/\\&/g')"
         identity="^https://github.com/${repo_re}/${workflow_re}@refs/.*$"
-        nix develop --no-write-lock-file --command           cosign verify-blob             --bundle "$BUNDLE"             --certificate-identity-regexp "$identity"             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"             "$QUALIFICATION"
+        nix shell github:NixOS/nixpkgs/2833a4f2f08058f980a143c9fb447953ef15f1cb#cosign --command cosign verify-blob             --bundle "$BUNDLE"             --certificate-identity-regexp "$identity"             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"             "$QUALIFICATION"
 
     - id: admit
       name: Exact-SHA compare-and-swap admission

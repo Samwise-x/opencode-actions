@@ -34,6 +34,7 @@ fi
 /usr/bin/rsync -a --delete   --exclude='.git'   --exclude='.opencode-evidence'   "$SOURCE/" "$TARGET/"
 
 cd "$TARGET"
+/usr/bin/git add -A
 if /usr/bin/git diff --name-only --diff-filter=U | /usr/bin/grep -q .; then
   echo "reconstructed candidate still contains unresolved conflicts" >&2
   exit 74
@@ -41,7 +42,6 @@ fi
 
 /usr/bin/python3 "$ROOT/scripts/check-protected.py"   --rules "$SOURCE/$PROTECTED_PATHS_FILE"   --base "$BASE"   --head WORKTREE
 
-/usr/bin/git add -A
 if ! /usr/bin/git diff --cached --quiet || /usr/bin/git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
   /usr/bin/git commit --no-verify     -m "agent: advance issue #$ISSUE"     -m "OpenCode-Attempt: $ATTEMPT"     -m "OpenCode-Issue: #$ISSUE"
 fi

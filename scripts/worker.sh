@@ -34,6 +34,7 @@ set -e
   /bin/kill -TERM "$pid" 2>/dev/null || true
 done
 /bin/sleep 1
+/usr/bin/ps -u "$(/usr/bin/id -u)" -o pid= | /usr/bin/awk '{$1=$1;print}' | sort -n > "$after"
 /usr/bin/comm -13 "$baseline" "$after" | while read -r pid; do
   [[ -z "$pid" || "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
   /bin/kill -KILL "$pid" 2>/dev/null || true
