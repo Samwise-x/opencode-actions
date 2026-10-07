@@ -28,6 +28,14 @@ jobs:
           python3 -m py_compile scripts/*.py
           for f in schemas/*.json; do jq empty "$f"; done
           ruby -e "require 'yaml'; YAML.load_file('action.yml'); YAML.load_file('admit/action.yml')"
+      - name: Static contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/admit.py scripts/publish.py
+          python3 -m json.tool opencode.json >/dev/null
+          python3 -m json.tool schemas/evidence-v1.schema.json >/dev/null
+          python3 -m json.tool schemas/trajectory-v1.schema.json >/dev/null
+          git diff --check
       - name: Trajectory state-machine tests
         run: bash tests/test-trajectory.sh
       - name: Trivy
