@@ -1,49 +1,68 @@
 name: OpenCode Frontier
+
 on:
   schedule:
     - cron: "0,12,24,36,48 * * * *"
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional issue number to force for this pass.
+        required: false
+        type: string
+
 permissions:
-  contents: write
-  pull-requests: write
   actions: read
+  checks: read
+  contents: write
+  issues: read
+  pull-requests: write
+
 concurrency:
-  group: opencode-frontier-${{ github.repository }}
+  group: opencode-frontier-${{ github.repository_id }}
   cancel-in-progress: false
+
 jobs:
   frontier:
     runs-on: ubuntu-24.04
-    timeout-minutes: 11
+    timeout-minutes: 12
     steps:
-      - name: CargoWall containment
-        uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414
-        with:
-          mode: enforce
-          offline: true
-          fail-on-unsupported: true
-          sudo-lockdown: true
-          allowed-hosts: |
-            opencode.ai
-            models.dev
       - name: Run disposable frontier worker
         id: frontier
-        uses: Samwise-x/opencode-actions@232cc61565829eca1909a602c465abb1499a3c76
+        uses: Samwise-x/opencode-actions@__IMPLEMENTATION_SHA__
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:
-          model: opencode/gpt-5.6-sol
+          model: ${{ vars.OPENCODE_MODEL }}
           agent: build
+          issue-number: ${{ inputs.issue_number }}
           prompt-file: .github/opencode/frontier.md
           validation-command: git diff --check
+          protected-paths-file: .opencode-actions/protected-paths.txt
+          trajectory-branch: opencode/trajectory
+          branch-prefix: opencode/issue-
+          required-checks: deterministic,security
           lease-seconds: "690"
+          worker-seconds: "540"
+          allowed-hosts: ${{ vars.OPENCODE_ALLOWED_HOSTS }}
+
       - name: Summary
         if: always()
+        env:
+          ACQUIRED: ${{ steps.frontier.outputs.acquired }}
+          REASON: ${{ steps.frontier.outputs.reason }}
+          ATTEMPT: ${{ steps.frontier.outputs.attempt-id }}
+          ISSUE: ${{ steps.frontier.outputs.issue-number }}
+          BASE: ${{ steps.frontier.outputs.base-sha }}
+          CANDIDATE: ${{ steps.frontier.outputs.candidate-sha }}
+          PR: ${{ steps.frontier.outputs.pr-url }}
         run: |
           {
             echo "### OpenCode frontier"
-            echo "- acquired: ${{ steps.frontier.outputs.acquired }}"
-            echo "- attempt: ${{ steps.frontier.outputs.attempt-id }}"
-            echo "- base: `${{ steps.frontier.outputs.base-sha }}`"
-            echo "- candidate: `${{ steps.frontier.outputs.candidate-sha }}`"
-            echo "- PR: ${{ steps.frontier.outputs.pr-url }}"
+            echo "- acquired: $ACQUIRED"
+            echo "- reason: $REASON"
+            echo "- attempt: $ATTEMPT"
+            echo "- issue: $ISSUE"
+            echo "- base: `$BASE`"
+            echo "- candidate: `$CANDIDATE`"
+            echo "- PR: $PR"
           } >> "$GITHUB_STEP_SUMMARY"

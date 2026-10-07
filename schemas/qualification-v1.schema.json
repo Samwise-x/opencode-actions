@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Samwise-x/opencode-actions/schemas/qualification-v1.schema.json",
+  "title": "OpenCode qualified candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kind",
+    "repository",
+    "candidate_sha",
+    "base_sha",
+    "issue_number",
+    "pr_number",
+    "attempt_id",
+    "frontier_evidence_sha256",
+    "validation_run_id",
+    "validation_workflow_ref",
+    "required_checks",
+    "generated_at"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "kind": { "const": "qualified-candidate" },
+    "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+    "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "pr_number": { "type": "integer", "minimum": 1 },
+    "attempt_id": { "type": "string", "minLength": 3 },
+    "model": { "type": ["string", "null"] },
+    "agent": { "type": ["string", "null"] },
+    "frontier_evidence_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "validation_run_id": { "type": "string", "minLength": 1 },
+    "validation_workflow_ref": { "type": "string", "minLength": 1 },
+    "required_checks": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "generated_at": { "type": "string", "format": "date-time" }
+  }
+}
