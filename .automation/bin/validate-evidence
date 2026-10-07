@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+import json, re, subprocess, sys
+from pathlib import Path
+
+if len(sys.argv) != 2:
+    raise SystemExit("usage: validate-evidence <manifest.json>")
+p=Path(sys.argv[1])
+d=json.loads(p.read_text())
+required={"schema_version","trajectory_id","trajectory_version","attempt_id","github_run_id","base_sha","candidate_sha","validation"}
+missing=required-d.keys()
+if missing: raise SystemExit("missing: "+",".join(sorted(missing)))
+if d["schema_version"] != 1: raise SystemExit("unsupported schema_version")
+for k in ("base_sha","candidate_sha"):
+    if not re.fullmatch(r"[0-9a-f]{40}",d[k]): raise SystemExit(f"invalid {k}")
+if d["validation"].get("status") != "passed": raise SystemExit("validation did not pass")
+candidate=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+if candidate != d["candidate_sha"]: raise SystemExit("manifest candidate_sha != HEAD")
+subprocess.run(["git","merge-base","--is-ancestor",d["base_sha"],d["candidate_sha"]],check=True)
+print("evidence valid")
