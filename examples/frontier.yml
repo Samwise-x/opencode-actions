@@ -1,0 +1,50 @@
+name: opencode-frontier
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/12 * * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: opencode-frontier-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Enforce runner egress policy
+        uses: code-cargo/cargowall-action@7943209964cc5472fee8aa1e02cde8a2f0dd0414
+        with:
+          mode: enforce
+          offline: true
+          fail-on-unsupported: true
+          sudo-lockdown: true
+          allowed-hosts: ${{ vars.OPENCODE_ALLOWED_HOSTS }}
+
+      # Replace v1 with the immutable commit SHA deployed from this repository.
+      - name: Run one frontier pass
+        id: frontier
+        uses: Samwise-x/opencode-actions@v1
+        env:
+          # Supply only the selected provider credential. Do not export GITHUB_TOKEN here.
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: ${{ vars.OPENCODE_MODEL }}
+          agent: build
+          prompt-file: .github/opencode/frontier.md
+          validation-command: ./ci/validate
+          lease-seconds: "900"
+
+      - name: Report candidate
+        if: steps.frontier.outputs.acquired == 'true'
+        run: |
+          echo "attempt=${{ steps.frontier.outputs.attempt-id }}"
+          echo "candidate=${{ steps.frontier.outputs.candidate-sha }}"
+          echo "pr=${{ steps.frontier.outputs.pr-url }}"
