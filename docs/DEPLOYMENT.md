@@ -6,7 +6,7 @@ This repository is a handoff substrate. The target repository receives the templ
 
 The target must have committed flake.nix and flake.lock.
 
-The canonical dev shell must contain project build/test dependencies, Dagger CLI, and Cosign CLI.
+The canonical dev shell must contain project build/test dependencies and the Dagger CLI. Qualification and admission obtain Cosign independently from an exact pinned nixpkgs revision.
 
 The target Dagger module must expose:
 
@@ -70,4 +70,4 @@ Every failure must leave canonical main unchanged.
 
 Enable the 12-minute schedule only after all acceptance cases pass.
 
-A no-work frontier finalizes idle. A currently validating candidate returns validation_pending. A qualified candidate waiting for admission returns admission_pending. These are normal states, not worker failures.
+A no-work frontier finalizes idle. A currently validating candidate returns validation_pending. A qualified candidate waiting for admission returns admission_pending. The admission workflow also retries recovery on an offset schedule, so a transient workflow_run delivery or API failure does not strand a qualified candidate. These are normal states, not worker failures.

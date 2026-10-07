@@ -35,7 +35,7 @@ No OpenCode session, local SQLite database, model context, background registry, 
 7. A fresh pinned OpenCode process runs for a bounded interval.
 8. The model can modify candidate files but cannot become the GitHub mutation authority.
 9. The wrapper checks HEAD, conflicts, protected paths, control-action integrity, and a lightweight deterministic command.
-10. Trusted wrapper code commits and updates one persistent issue branch with force-with-lease, then creates/updates one PR.
+10. Trusted wrapper code reconstructs publication in a fresh Git repository outside the model worktree, commits and force-with-lease updates one persistent issue branch, then creates/updates one PR.
 11. Candidate validation runs independently with Nix + Dagger, Zizmor, and Trivy.
 12. A trusted seal job checks out the validated candidate's original canonical base, generates qualification evidence, and signs it with Cosign from the canonical Nix environment.
 13. Admission verifies the Sigstore workflow identity, candidate SHA, PR head, original base SHA, required check runs, ancestry, and protected paths.
@@ -51,6 +51,10 @@ Linux x64 asset SHA-256:
 
     c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d
 
+Linux arm64 asset SHA-256:
+
+    f7f2ba59ee8aa94d388f9696575a32d20e71c2ee48def9f80fc693a60fec6c72
+
 The upstream anomalyco/opencode/github@latest wrapper is intentionally not the production trust anchor. The repository uses the non-interactive OpenCode CLI directly and captures --format json events as evidence.
 
 ## Target repository contract
@@ -59,7 +63,7 @@ The target repository must provide a canonical main, GitHub Issues with ready-fo
 
     dagger call validate
 
-The trusted canonical Nix dev shell must provide both dagger and cosign. Candidate validation executes nix develop --no-write-lock-file --command dagger call validate; seal/admission use the same canonical Nix environment for Cosign.
+The canonical Nix dev shell must provide Dagger and all project validation dependencies. Candidate validation executes `nix develop --no-write-lock-file --command dagger call validate`. Seal/admission obtain Cosign from an exact pinned nixpkgs revision, so candidate-controlled project flakes do not supply the signing/verifying binary.
 
 Copy:
 
@@ -71,7 +75,7 @@ Copy:
 - templates/harden-runtime.js -> .opencode/plugins/harden-runtime.js
 - templates/protected-paths.txt -> .opencode-actions/protected-paths.txt
 
-All Samwise-x/opencode-actions references in the final handoff templates are pinned to immutable implementation commit 23a6bf960b4ad104a2a237d48e3ba1a15619f250.
+All Samwise-x/opencode-actions references in the handoff templates are pinned to the CI-validated implementation commit `caa4756ccd14ee820d4a0cb0b476889088ad8412`.
 
 ## Required GitHub configuration
 
