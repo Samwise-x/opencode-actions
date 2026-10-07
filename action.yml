@@ -25,7 +25,7 @@ inputs:
   lease-seconds:
     description: Lease lifetime; must exceed the intended frontier runtime.
     required: false
-    default: "900"
+    default: "690"
   opencode-version:
     description: Pinned OpenCode release version.
     required: false
