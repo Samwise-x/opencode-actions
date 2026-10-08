@@ -270,6 +270,14 @@ with tempfile.TemporaryDirectory() as td:
         assert relative in installed_agents
         assert (green / relative).is_file()
 
+    assert {
+        "needs-triage",
+        "needs-info",
+        "ready-for-agent",
+        "ready-for-human",
+        "wontfix",
+    } <= {path.name for path in (green_state / "labels").iterdir()}
+
     ruleset = json.loads((green_state / "ruleset.json").read_text())
     assert ruleset["bypass_actors"] == [{
         "actor_id": 1234,
