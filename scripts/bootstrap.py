@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TESTING = os.environ.get("OPENCODE_BOOTSTRAP_TESTING") == "1"
 RULESET = "opencode-canonical-admission"
 
 MANAGED = {
@@ -18,9 +17,25 @@ MANAGED = {
     "templates/candidate-validation.yml": ".github/workflows/opencode-candidate-validation.yml",
     "templates/admit.yml": ".github/workflows/opencode-admit.yml",
     "templates/frontier.md": ".github/opencode/frontier.md",
-    "templates/opencode.json": "opencode.json",
     "templates/harden-runtime.js": ".opencode/plugins/harden-runtime.js",
 }
+
+REQUIRED_OPENCODE_EDIT_DENIES = (
+    ".git/**",
+    ".github/workflows/opencode-*.yml",
+    ".github/opencode/**",
+    ".opencode-actions/**",
+    ".opencode/plugins/**",
+    "opencode.json",
+    "opencode.jsonc",
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/adr/**",
+    "flake.nix",
+    "flake.lock",
+    "dagger.json",
+    "dagger/**",
+)
 
 CONTEXT = """# Domain language
 
@@ -88,6 +103,13 @@ def json_cmd(args, cwd):
         raise Error(f"{args[0]} returned invalid JSON") from exc
 
 
+def load_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise Error(f"invalid JSON in {path.name}: {exc}") from exc
+
+
 def ensure_repo(target):
     require("git")
     if cmd(["git", "rev-parse", "--is-inside-work-tree"], target, check=False).returncode:
@@ -142,11 +164,40 @@ def install_protected_paths(target, changed):
         changed.append(".opencode-actions/protected-paths.txt")
 
 
+def install_opencode(target, changed):
+    path = target / "opencode.json"
+    jsonc = target / "opencode.jsonc"
+    if jsonc.exists():
+        raise Error("opencode.jsonc is present; refusing ambiguous OpenCode configuration")
+
+    if not path.exists():
+        install_exact(target, "templates/opencode.json", "opencode.json", changed)
+        return
+
+    config = load_json(path)
+    if config.get("share") != "disabled":
+        raise Error("existing opencode.json must set share=disabled")
+
+    edit = (config.get("permission") or {}).get("edit")
+    if edit == "deny":
+        return
+    if not isinstance(edit, dict):
+        raise Error("existing opencode.json must deny protected edit paths")
+
+    missing = [pattern for pattern in REQUIRED_OPENCODE_EDIT_DENIES if edit.get(pattern) != "deny"]
+    if missing:
+        raise Error(
+            "existing opencode.json is missing required edit denies: "
+            + ", ".join(missing)
+        )
+
+
 def install_local(target):
     changed = []
     for source, destination in MANAGED.items():
         install_exact(target, source, destination, changed)
     install_protected_paths(target, changed)
+    install_opencode(target, changed)
 
     if not (target / "AGENTS.md").exists():
         write_missing(target, "AGENTS.md", (ROOT / "AGENTS.md").read_text(encoding="utf-8"), changed)
@@ -157,20 +208,16 @@ def install_local(target):
         write_missing(target, "dagger.json", DAGGER_JSON, changed)
         write_missing(target, "dagger/main.go", DAGGER_GO, changed)
 
-    for name in ("opencode.json", "dagger.json"):
-        path = target / name
-        if path.is_file():
-            try:
-                json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                raise Error(f"invalid JSON in {name}: {exc}") from exc
+    dagger_json = target / "dagger.json"
+    if dagger_json.is_file():
+        load_json(dagger_json)
 
     cmd(["git", "diff", "--check"], target)
     return changed
 
 
-def gh(args, target):
-    return cmd(["gh", *args], target)
+def gh(args, target, *, input_text=None):
+    return cmd(["gh", *args], target, input_text=input_text)
 
 
 def gh_json(args, target):
@@ -192,10 +239,9 @@ def actor_for(existing):
             return int(raw), actor_type
         except ValueError as exc:
             raise Error("OPENCODE_ADMISSION_BYPASS_ACTOR_ID must be an integer") from exc
-    if existing:
-        for item in existing.get("bypass_actors") or []:
-            if item.get("actor_id") is not None and item.get("actor_type"):
-                return int(item["actor_id"]), str(item["actor_type"])
+    bypass = (existing or {}).get("bypass_actors") or []
+    if len(bypass) == 1 and bypass[0].get("actor_id") is not None and bypass[0].get("actor_type"):
+        return int(bypass[0]["actor_id"]), str(bypass[0]["actor_type"])
     return None
 
 
@@ -206,11 +252,13 @@ def ruleset_ok(existing, actor):
     if "refs/heads/main" not in include:
         return False
     actor_id, actor_type = actor
-    bypass_ok = any(
-        int(item.get("actor_id", -1)) == actor_id
-        and item.get("actor_type") == actor_type
-        and item.get("bypass_mode", "always") == "always"
-        for item in existing.get("bypass_actors") or []
+    bypass = existing.get("bypass_actors") or []
+    if len(bypass) != 1:
+        return False
+    bypass_ok = (
+        int(bypass[0].get("actor_id", -1)) == actor_id
+        and bypass[0].get("actor_type") == actor_type
+        and bypass[0].get("bypass_mode", "always") == "always"
     )
     rules = {item.get("type"): item for item in existing.get("rules") or []}
     checks = {
@@ -315,16 +363,7 @@ def configure_github(target, state):
 
     for name in ("OPENCODE_API_KEY", "ADMISSION_TOKEN"):
         if name not in secrets:
-            p = subprocess.run(
-                ["gh", "secret", "set", name],
-                cwd=target,
-                input=os.environ[name],
-                text=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            if p.returncode:
-                raise Error(f"failed to set GitHub secret: {name}")
+            gh(["secret", "set", name], target, input_text=os.environ[name])
             changed.append(f"github:secret:{name}")
 
     if existing is None:
@@ -358,12 +397,10 @@ def main():
         raise Error(f"target directory does not exist: {target}")
 
     ensure_repo(target)
-    github_state = None if TESTING else preflight_github(target)
+    github_state = preflight_github(target)
     changed = install_local(target)
-
-    if not TESTING:
-        changed.extend(validate_external(target))
-        changed.extend(configure_github(target, github_state))
+    changed.extend(validate_external(target))
+    changed.extend(configure_github(target, github_state))
 
     if changed:
         print("bootstrap: changed")
