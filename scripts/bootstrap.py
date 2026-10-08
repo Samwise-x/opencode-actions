@@ -20,6 +20,13 @@ MANAGED = {
     "templates/harden-runtime.js": ".opencode/plugins/harden-runtime.js",
 }
 
+AGENT_DOCS = (
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
+    "docs/agents/domain.md",
+    "docs/agents/engineering.md",
+)
+
 REQUIRED_OPENCODE_EDIT_DENIES = (
     ".git/**",
     ".github/workflows/opencode-*.yml",
@@ -31,6 +38,7 @@ REQUIRED_OPENCODE_EDIT_DENIES = (
     "AGENTS.md",
     "CONTEXT.md",
     "docs/adr/**",
+    "docs/agents/**",
     "flake.nix",
     "flake.lock",
     "dagger.json",
@@ -201,6 +209,8 @@ def install_local(target):
 
     if not (target / "AGENTS.md").exists():
         write_missing(target, "AGENTS.md", (ROOT / "AGENTS.md").read_text(encoding="utf-8"), changed)
+    for relative in AGENT_DOCS:
+        write_missing(target, relative, (ROOT / relative).read_text(encoding="utf-8"), changed)
     write_missing(target, "CONTEXT.md", CONTEXT, changed)
     write_missing(target, "flake.nix", FLAKE, changed)
 

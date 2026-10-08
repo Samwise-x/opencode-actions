@@ -205,6 +205,15 @@ def snapshot(path: Path) -> dict[str, str]:
     }
 
 
+makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+public_targets = [
+    line[:-1]
+    for line in makefile.splitlines()
+    if line.endswith(":") and not line.startswith(".")
+]
+assert ".DEFAULT_GOAL := all" in makefile
+assert public_targets == ["all"]
+
 with tempfile.TemporaryDirectory() as td:
     base = Path(td)
     fake_bin = base / "bin"
@@ -237,6 +246,10 @@ with tempfile.TemporaryDirectory() as td:
         ".opencode/plugins/harden-runtime.js",
         "AGENTS.md",
         "CONTEXT.md",
+        "docs/agents/issue-tracker.md",
+        "docs/agents/triage-labels.md",
+        "docs/agents/domain.md",
+        "docs/agents/engineering.md",
         "flake.nix",
         "flake.lock",
         "dagger.json",
@@ -247,6 +260,15 @@ with tempfile.TemporaryDirectory() as td:
     assert ".github/opencode/**" in (
         green / ".opencode-actions/protected-paths.txt"
     ).read_text()
+    installed_agents = (green / "AGENTS.md").read_text(encoding="utf-8")
+    for relative in (
+        "docs/agents/issue-tracker.md",
+        "docs/agents/triage-labels.md",
+        "docs/agents/domain.md",
+        "docs/agents/engineering.md",
+    ):
+        assert relative in installed_agents
+        assert (green / relative).is_file()
 
     ruleset = json.loads((green_state / "ruleset.json").read_text())
     assert ruleset["bypass_actors"] == [{
