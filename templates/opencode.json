@@ -22,7 +22,8 @@
       "flake.nix": "deny",
       "flake.lock": "deny",
       "dagger.json": "deny",
-      "dagger/**": "deny"
+      "dagger/**": "deny",
+      ".github/opencode/**": "deny"
     },
     "glob": "allow",
     "grep": "allow",

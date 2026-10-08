@@ -2,6 +2,7 @@
 .github/workflows/opencode-frontier.yml
 .github/workflows/opencode-candidate-validation.yml
 .github/workflows/opencode-admit.yml
+.github/opencode/**
 .opencode-actions/**
 .opencode/plugins/**
 opencode.json

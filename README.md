@@ -12,6 +12,7 @@ No OpenCode session, local SQLite database, model context, background registry, 
 
 ## What this repository contains
 
+- Makefile + scripts/bootstrap.py: one idempotent repository bootstrap interface.
 - action.yml: one bounded frontier worker: lease, reconstruct, execute, prevalidate, publish, evidence.
 - seal/action.yml: trusted post-validation qualification and keyless Cosign signature.
 - admit/action.yml: signed-evidence verification plus exact-SHA canonical CAS.
@@ -57,6 +58,22 @@ Linux arm64 asset SHA-256:
 
 The upstream anomalyco/opencode/github@latest wrapper is intentionally not the production trust anchor. The repository uses the non-interactive OpenCode CLI directly and captures --format json events as evidence.
 
+## Bootstrap
+
+The public setup interface is one command:
+
+    make
+
+The bootstrap observes the target before mutating it, reuses existing AGENTS/CONTEXT/Nix/Dagger state, installs only missing playbook-owned files, validates through `dagger call validate`, and reconciles the GitHub label, variables, secrets, and canonical-branch ruleset. A repeated run with the same inputs is a semantic no-op.
+
+From a separate `opencode-actions` checkout, point the same interface at a target with:
+
+    make TARGET=/path/to/repository
+
+A first greenfield run requires authenticated `gh`, Nix, an existing or supplied `OPENCODE_MODEL`, existing or supplied `OPENCODE_API_KEY` and `ADMISSION_TOKEN`, and the admission bypass actor ID. Existing secret values are never rewritten merely because `make` ran again.
+
+No bootstrap state file exists. Repository and GitHub state are the bootstrap state.
+
 ## Target repository contract
 
 The target repository must provide a canonical main, GitHub Issues with ready-for-agent, deterministic tests, flake.nix + flake.lock, and a Dagger module exposing:
@@ -65,15 +82,7 @@ The target repository must provide a canonical main, GitHub Issues with ready-fo
 
 The canonical Nix dev shell must provide Dagger and all project validation dependencies. Candidate validation executes `nix develop --no-write-lock-file --command dagger call validate`. Seal/admission obtain Cosign from an exact pinned nixpkgs revision, so candidate-controlled project flakes do not supply the signing/verifying binary.
 
-Copy:
-
-- templates/frontier.yml -> .github/workflows/opencode-frontier.yml
-- templates/candidate-validation.yml -> .github/workflows/opencode-candidate-validation.yml
-- templates/admit.yml -> .github/workflows/opencode-admit.yml
-- templates/frontier.md -> .github/opencode/frontier.md
-- templates/opencode.json -> opencode.json
-- templates/harden-runtime.js -> .opencode/plugins/harden-runtime.js
-- templates/protected-paths.txt -> .opencode-actions/protected-paths.txt
+The bootstrap installs the caller workflows, worker prompt, OpenCode policy/runtime guard, and protected-path policy from `templates/`. Existing brownfield Nix/Dagger/domain/agent state is preserved and must satisfy the same validation contract.
 
 All Samwise-x/opencode-actions references in the handoff templates are pinned to the CI-validated implementation commit `caa4756ccd14ee820d4a0cb0b476889088ad8412`.
 
