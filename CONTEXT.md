@@ -21,3 +21,9 @@
 **canonical state**: state reachable from the protected canonical branch. Model output alone is never canonical.
 
 **reconstruction**: deriving the next worker's starting state from Git/GitHub state and SHA-bound evidence instead of preserving prior model context.
+
+**hook**: repository-owned deterministic lifecycle interception. OpenCode callbacks or other runtime events may implement a hook, but they do not define the architectural boundary.
+
+**review phase**: mandatory pre-publication lifecycle stage that invokes fresh isolated reviewers against candidate state and records their findings as evidence.
+
+**review finding**: probabilistic reviewer judgment that may drive bounded repair but is never canonical truth or admission authority.
