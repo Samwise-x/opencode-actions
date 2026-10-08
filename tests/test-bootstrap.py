@@ -261,13 +261,10 @@ with tempfile.TemporaryDirectory() as td:
     brown_state = base / "brown-gh"
     brown_env = env_for(fake_bin, brown_state)
 
-    custom_opencode = {
-        "share": "disabled",
-        "model": "example/custom",
-        "permission": {
-            "edit": {pattern: "deny" for pattern in REQUIRED_DENIES},
-        },
-    }
+    custom_opencode = json.loads(
+        (ROOT / "templates/opencode.json").read_text(encoding="utf-8")
+    )
+    custom_opencode["model"] = "example/custom"
     originals = {
         "AGENTS.md": "# custom agents\n",
         "CONTEXT.md": "# Domain language\n\n**widget**: existing term.\n",
