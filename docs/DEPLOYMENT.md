@@ -14,11 +14,17 @@ The target Dagger module must expose:
 
 That call is the portable deterministic build/test/package graph. Local and CI validation should execute the same graph.
 
-## 2. Install repository files
+## 2. Reconcile the target
 
-Copy the files listed in the root README. Do not copy runtime evidence or trajectory state into main.
+The public bootstrap interface is:
 
-Review .opencode-actions/protected-paths.txt. Its default denies autonomous modification of workflow/admission policy, OpenCode policy/plugins, AGENTS/CONTEXT/ADRs, Nix/Dagger definitions, and security scanner policy.
+    make
+
+From a separate distribution checkout, use the same interface with `TARGET=/path/to/repository`. The bootstrap inspects before mutating, preserves existing brownfield AGENTS/CONTEXT/Nix/Dagger state, installs missing playbook-owned files, creates the minimum greenfield validation seam when none exists, and fails closed on conflicting managed files.
+
+It also reconciles the `ready-for-agent` label, required repository variables/secrets when supplied or already present, and the canonical-branch ruleset. It persists no installer state; a second run must converge to no semantic change.
+
+Review .opencode-actions/protected-paths.txt. Its default denies autonomous modification of workflow/admission policy, the worker prompt, OpenCode policy/plugins, AGENTS/CONTEXT/ADRs, Nix/Dagger definitions, and security scanner policy.
 
 ## 3. Configure OpenCode
 

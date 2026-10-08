@@ -61,6 +61,9 @@ jobs:
           grep -q 'force-with-lease' scripts/trajectory.sh
           grep -q 'force-with-lease' scripts/admit.py
 
+      - name: Bootstrap convergence tests
+        run: python3 tests/test-bootstrap.py
+
       - name: Trajectory state-machine tests
         run: bash tests/test-trajectory.sh
 
