@@ -64,6 +64,9 @@ jobs:
       - name: Bootstrap convergence tests
         run: python3 tests/test-bootstrap.py
 
+      - name: Frontier reconstruction tests
+        run: python3 tests/test-frontier.py
+
       - name: Trajectory state-machine tests
         run: bash tests/test-trajectory.sh
 

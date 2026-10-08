@@ -29,7 +29,7 @@ No OpenCode session, local SQLite database, model context, background registry, 
 
 1. A scheduled/manual frontier workflow starts from canonical main.
 2. The wrapper obtains a global lease with Git force-with-lease CAS.
-3. It reconstructs the current trajectory from open opencode/issue-* PRs or the deterministic ready-for-agent issue frontier.
+3. It resumes open PR work through GitHub's native closing-issue linkage, otherwise selects the deterministic ready-for-agent issue frontier.
 4. It fetches issue/PR context before model execution.
 5. GitHub credentials are removed and GitHub command files are replaced with disposable decoys.
 6. Strict CargoWall starts.
