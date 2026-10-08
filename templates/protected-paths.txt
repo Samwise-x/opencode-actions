@@ -10,6 +10,7 @@ opencode.jsonc
 AGENTS.md
 CONTEXT.md
 docs/adr/**
+docs/agents/**
 flake.nix
 flake.lock
 dagger.json

@@ -22,7 +22,9 @@
       "schemas/**": "deny",
       "opencode.json": "deny",
       "AGENTS.md": "deny",
-      "CONTEXT.md": "deny"
+      "CONTEXT.md": "deny",
+      "Makefile": "deny",
+      "docs/agents/**": "deny"
     },
     "glob": "allow",
     "grep": "allow",

@@ -8,6 +8,8 @@ seal/**
 scripts/**
 templates/**
 schemas/**
+Makefile
+docs/agents/**
 opencode.json
 AGENTS.md
 CONTEXT.md

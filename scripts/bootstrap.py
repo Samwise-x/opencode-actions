@@ -12,6 +12,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RULESET = "opencode-canonical-admission"
 
+TRIAGE_LABELS = {
+    "needs-triage": "Maintainer evaluation required",
+    "needs-info": "Waiting on required information",
+    "ready-for-agent": "Fully specified and ready for an agent",
+    "ready-for-human": "Requires human judgment or authority",
+    "wontfix": "Will not be actioned",
+}
+
 MANAGED = {
     "templates/frontier.yml": ".github/workflows/opencode-frontier.yml",
     "templates/candidate-validation.yml": ".github/workflows/opencode-candidate-validation.yml",
@@ -19,6 +27,13 @@ MANAGED = {
     "templates/frontier.md": ".github/opencode/frontier.md",
     "templates/harden-runtime.js": ".opencode/plugins/harden-runtime.js",
 }
+
+AGENT_DOCS = (
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
+    "docs/agents/domain.md",
+    "docs/agents/engineering.md",
+)
 
 REQUIRED_OPENCODE_EDIT_DENIES = (
     ".git/**",
@@ -31,6 +46,7 @@ REQUIRED_OPENCODE_EDIT_DENIES = (
     "AGENTS.md",
     "CONTEXT.md",
     "docs/adr/**",
+    "docs/agents/**",
     "flake.nix",
     "flake.lock",
     "dagger.json",
@@ -201,6 +217,8 @@ def install_local(target):
 
     if not (target / "AGENTS.md").exists():
         write_missing(target, "AGENTS.md", (ROOT / "AGENTS.md").read_text(encoding="utf-8"), changed)
+    for relative in AGENT_DOCS:
+        write_missing(target, relative, (ROOT / relative).read_text(encoding="utf-8"), changed)
     write_missing(target, "CONTEXT.md", CONTEXT, changed)
     write_missing(target, "flake.nix", FLAKE, changed)
 
@@ -347,13 +365,15 @@ def configure_github(target, state):
     changed = []
 
     labels = {x["name"] for x in gh_json(["label", "list", "--limit", "1000", "--json", "name"], target) or []}
-    if "ready-for-agent" not in labels:
+    for name, description in TRIAGE_LABELS.items():
+        if name in labels:
+            continue
         gh([
-            "label", "create", "ready-for-agent",
-            "--description", "Work whose blockers are complete and ready for an agent",
+            "label", "create", name,
+            "--description", description,
             "--color", "ededed",
         ], target)
-        changed.append("github:label:ready-for-agent")
+        changed.append(f"github:label:{name}")
 
     for name in ("OPENCODE_MODEL", "OPENCODE_ALLOWED_HOSTS"):
         desired = os.environ.get(name)
