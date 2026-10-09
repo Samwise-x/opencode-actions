@@ -41,9 +41,9 @@ Any bootstrap capability must remain reachable through the default Make target. 
 
 The invariant is behavioral:
 
-- first greenfield run converges to the complete minimum playbook;
-- every document referenced by the installed `AGENTS.md` exists after that run;
-- an immediate second run with identical inputs is a semantic no-op;
+- a greenfield run creates the minimum substrate but leaves validation deliberately fail-closed until the repository defines real behavior in its Dagger `Validate` graph;
+- every document referenced by the installed `AGENTS.md` exists after that first reconciliation;
+- after the real validation graph is supplied, rerunning the same `make` completes reconciliation and an immediate repeat is a semantic no-op;
 - valid brownfield repository-owned state is preserved;
 - conflicts and missing authority fail closed.
 
