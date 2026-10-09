@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "version": "1.1.0",
+  "runtime_sha": "3b52b488c7deda78ed01d3d47ed645b906a150ce",
+  "managed": {
+    ".github/opencode/frontier.md": {
+      "source": "templates/frontier.md",
+      "accepted_previous_blobs": [
+        "d127a4692a378ca90dfc330bc420bc81159b88ae"
+      ]
+    },
+    ".github/workflows/opencode-admit.yml": {
+      "source": "templates/admit.yml",
+      "accepted_previous_blobs": [
+        "05c5bf9254d995dae730ac29e2111647038500b5"
+      ]
+    },
+    ".github/workflows/opencode-candidate-validation.yml": {
+      "source": "templates/candidate-validation.yml",
+      "accepted_previous_blobs": [
+        "938e882f8a7498e1def30e744abd87e046001162"
+      ]
+    },
+    ".github/workflows/opencode-frontier.yml": {
+      "source": "templates/frontier.yml",
+      "accepted_previous_blobs": [
+        "8f1f257b7798004126df180bb90bb251bd1c9a04"
+      ]
+    },
+    ".opencode/plugins/harden-runtime.js": {
+      "source": "templates/harden-runtime.js",
+      "accepted_previous_blobs": [
+        "87ba35fbb911fe529dc03aad7f37d2027452364e"
+      ]
+    }
+  }
+}
