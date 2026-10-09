@@ -36,7 +36,7 @@ candidate1="$(env \
   PUBLISH_REMOTE_URL="$remote" \
   TRAJECTORY_REMOTE_URL="$remote" \
   GITHUB_WORKSPACE="$source" \
-  RUNNER_TEMP="$T/runner/publish1" \
+  RUNNER_TEMP="$T/runner" \
   ATTEMPT_ID="$attempt" \
   BASE_SHA="$base" \
   ISSUE_NUMBER=1 \
@@ -76,7 +76,7 @@ if env \
   PUBLISH_REMOTE_URL="$remote" \
   TRAJECTORY_REMOTE_URL="$remote" \
   GITHUB_WORKSPACE="$source" \
-  RUNNER_TEMP="$T/runner/publish2" \
+  RUNNER_TEMP="$T/runner" \
   ATTEMPT_ID="$attempt2" \
   BASE_SHA="$base" \
   ISSUE_NUMBER=1 \
