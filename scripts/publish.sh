@@ -50,7 +50,7 @@ fi
   --head WORKTREE
 
 if ! /usr/bin/git diff --cached --quiet || /usr/bin/git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-  /usr/bin/git commit --no-verify \
+  /usr/bin/git commit -q --no-verify \
     -m "agent: advance issue #$ISSUE" \
     -m "OpenCode-Attempt: $ATTEMPT" \
     -m "OpenCode-Issue: #$ISSUE"
