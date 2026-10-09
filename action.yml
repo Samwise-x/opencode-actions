@@ -271,6 +271,9 @@ runs:
         ISSUE_TITLE: ${{ steps.frontier.outputs.issue_title }}
         CANDIDATE_BRANCH: ${{ steps.frontier.outputs.branch }}
         EXPECTED_REMOTE_HEAD: ${{ steps.prepare.outputs.remote_head }}
+        TRAJECTORY_BRANCH: ${{ inputs.trajectory-branch }}
+        TRAJECTORY_SHA: ${{ steps.lease.outputs.trajectory_sha }}
+        LEASE_TOKEN: ${{ steps.lease.outputs.lease_token }}
         EVIDENCE_DIR: ${{ runner.temp }}/opencode-evidence
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         OCA_ACTION_ROOT: ${{ github.action_path }}
@@ -293,6 +296,7 @@ runs:
           pr_url="$(grep '^pr_url=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
           /usr/bin/jq --arg pr_number "$pr_number" --arg pr_url "$pr_url"             '.pr_number=($pr_number|tonumber) | .pr_url=$pr_url'             "$EVIDENCE_DIR/evidence.json" > "$EVIDENCE_DIR/evidence.tmp"
           mv "$EVIDENCE_DIR/evidence.tmp" "$EVIDENCE_DIR/evidence.json"
+          /usr/bin/python3 "$OCA_ACTION_ROOT/scripts/schema-check.py" "$OCA_ACTION_ROOT/schemas/evidence-v2.schema.json" "$EVIDENCE_DIR/evidence.json"
           /usr/bin/sha256sum "$EVIDENCE_DIR/evidence.json" | /usr/bin/awk '{print $1}' > "$EVIDENCE_DIR/evidence.sha256"
         fi
 
