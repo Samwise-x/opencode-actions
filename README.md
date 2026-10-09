@@ -12,7 +12,8 @@ No OpenCode session, local SQLite database, model context, background registry, 
 
 ## What this repository contains
 
-- Makefile + scripts/bootstrap.py: one idempotent repository bootstrap interface.
+- Makefile + scripts/bootstrap.py: one idempotent repository bootstrap interface with known-version upgrades and unknown-drift refusal.
+- release.json + scripts/release.py: one immutable distributed runtime identity, rendered self-action pins, and bounded release promotion.
 - action.yml: one bounded frontier worker: lease, reconstruct, execute, prevalidate, publish, evidence.
 - seal/action.yml: trusted post-validation qualification and keyless Cosign signature.
 - admit/action.yml: signed-evidence verification plus exact-SHA canonical CAS.
@@ -39,7 +40,7 @@ No OpenCode session, local SQLite database, model context, background registry, 
 10. Trusted wrapper code reconstructs publication in a fresh Git repository outside the model worktree, commits and force-with-lease updates one persistent issue branch, then creates/updates one PR.
 11. Candidate validation runs independently with Nix + Dagger, Zizmor, and Trivy.
 12. A trusted seal job checks out the validated candidate's original canonical base, generates qualification evidence, and signs it with Cosign from the canonical Nix environment.
-13. Admission verifies the Sigstore workflow identity, candidate SHA, PR head, original base SHA, required check runs, ancestry, and protected paths.
+13. Admission verifies the Sigstore workflow identity, candidate SHA, PR head, original base SHA, the exact recorded successful validation workflow run and required jobs, ancestry, and protected paths.
 14. Canonical main advances only by a fast-forward force-with-lease update from the qualified base to the exact qualified candidate SHA.
 
 If any identity or state changed, admission rejects and the next worker reconstructs from GitHub.
@@ -64,13 +65,13 @@ The public setup interface is one command:
 
     make
 
-The bootstrap observes the target before mutating it, reuses existing AGENTS/CONTEXT/Nix/Dagger state, installs only missing playbook-owned files, validates through `dagger call validate`, and reconciles the GitHub label, variables, secrets, and canonical-branch ruleset. A repeated run with the same inputs is a semantic no-op.
+The bootstrap observes the target before mutating it, reuses existing AGENTS/CONTEXT/Nix/Dagger state, upgrades only byte-identical known generated managed files, refuses unknown managed drift, validates through `dagger call validate`, and reconciles the GitHub label, variables, secrets, and canonical-branch ruleset. A repeated run with the same inputs is a semantic no-op.
 
 From a separate `opencode-actions` checkout, point the same interface at a target with:
 
     make TARGET=/path/to/repository
 
-A first greenfield run requires authenticated `gh`, Nix, an existing or supplied `OPENCODE_MODEL`, existing or supplied `OPENCODE_API_KEY` and `ADMISSION_TOKEN`, and the admission bypass actor ID. Existing secret values are never rewritten merely because `make` ran again.
+A first greenfield run requires authenticated `gh`, Nix, an existing or supplied `OPENCODE_MODEL`, existing or supplied `OPENCODE_API_KEY` and `ADMISSION_TOKEN`, and the admission bypass actor ID. Bootstrap may create the Dagger seam, but it deliberately leaves that seam fail-closed until the repository supplies a real behavior-validation graph; rerun the same `make` after defining it. Existing secret values are never rewritten merely because `make` ran again.
 
 No bootstrap state file exists. Repository and GitHub state are the bootstrap state.
 
@@ -84,7 +85,7 @@ The canonical Nix dev shell must provide Dagger and all project validation depen
 
 The bootstrap installs the caller workflows, worker prompt, OpenCode policy/runtime guard, and protected-path policy from `templates/`. Existing brownfield Nix/Dagger/domain/agent state is preserved and must satisfy the same validation contract.
 
-All Samwise-x/opencode-actions references in the handoff templates are pinned to the CI-validated implementation commit `caa4756ccd14ee820d4a0cb0b476889088ad8412`.
+All distributed Samwise-x/opencode-actions references are rendered from the single immutable `release.json.runtime_sha`. Runtime-bearing changes on canonical main are detected by the release-self-heal workflow, which proposes a release promotion PR; it never auto-admits the promotion.
 
 ## Required GitHub configuration
 
