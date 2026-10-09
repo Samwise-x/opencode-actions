@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, os
+import argparse, hashlib, json, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
 
 def main()->int:
     p=argparse.ArgumentParser()
     p.add_argument("--frontier-evidence",required=True); p.add_argument("--candidate",required=True)
     p.add_argument("--pr",type=int,required=True); p.add_argument("--required-check",action="append",default=[])
     p.add_argument("--output",required=True); a=p.parse_args()
-    path=Path(a.frontier_evidence); raw=path.read_bytes(); evidence=json.loads(raw)
+    path=Path(a.frontier_evidence)
+    subprocess.run([sys.executable, str(ROOT/"scripts/schema-check.py"), str(ROOT/"schemas/evidence-v2.schema.json"), str(path)], check=True)
+    raw=path.read_bytes(); evidence=json.loads(raw)
     if evidence.get("schema")!=2 or evidence.get("kind")!="agent-attempt": raise SystemExit("unsupported frontier evidence")
     if evidence.get("status")!="prevalidated": raise SystemExit("frontier evidence is not prevalidated")
     if evidence.get("candidate_sha")!=a.candidate: raise SystemExit("candidate SHA mismatch")
@@ -26,5 +30,7 @@ def main()->int:
       "generated_at":datetime.now(timezone.utc).isoformat()
     }
     out=Path(a.output); out.parent.mkdir(parents=True,exist_ok=True)
-    out.write_text(json.dumps(doc,indent=2,sort_keys=True)+"\n",encoding="utf-8"); return 0
+    out.write_text(json.dumps(doc,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+    subprocess.run([sys.executable, str(ROOT/"scripts/schema-check.py"), str(ROOT/"schemas/qualification-v1.schema.json"), str(out)], check=True)
+    return 0
 if __name__=="__main__": raise SystemExit(main())

@@ -10,7 +10,7 @@ It receives source code, issue/PR context, selected provider credentials needed 
 
 ### Candidate-validation zone
 
-Candidate code is untrusted. Deterministic/security jobs run with read-only repository authority and no admission secret or OIDC signing authority.
+Candidate code is untrusted. Deterministic/security jobs run with read-only repository authority and no admission secret or OIDC signing authority. Autonomous candidate identity is derived from commit evidence plus GitHub's native PR→Issue closing relationship, and the Issue must still be open and `ready-for-agent`; branch names confer no authority.
 
 ### Trusted qualification zone
 
@@ -18,7 +18,7 @@ The seal job runs only after deterministic and security jobs succeed. It checks 
 
 ### Trusted admission zone
 
-Admission executes no candidate code. It verifies evidence and GitHub state, then performs one atomic fast-forward CAS.
+Admission executes no candidate code. It verifies signed evidence, the exact recorded successful validation workflow run and required jobs, live GitHub state, ancestry, and protected paths, then performs one atomic fast-forward CAS.
 
 ## Credential separation
 
@@ -34,11 +34,11 @@ Do not collapse these credentials into one job or one long-lived token.
 
 The model subprocess has GH_TOKEN and GITHUB_TOKEN removed; GitHub command-file environment variables redirected to decoys; strict CargoWall enforcement, offline policy mode, fail-on-unsupported, and sudo lockdown; OpenCode question/web network/external-directory permissions denied; a runtime plugin that blanks secret-like environment variables for shell tools and blocks direct GitHub/Git mutation commands; protected-path checks; HEAD/conflict checks; bounded runtime; and post-run process cleanup.
 
-Privileged candidate publication and trajectory mutation are reconstructed in fresh temporary Git repositories rather than trusting model-controlled `.git` metadata. These controls reduce model authority. They do not make model output trustworthy. Trust is conferred only by deterministic qualification plus admission.
+Privileged candidate publication and trajectory mutation are reconstructed in fresh temporary Git repositories rather than trusting model-controlled `.git` metadata. Immediately before candidate publication, the wrapper revalidates the live trajectory SHA, lease token, originating attempt/base, and expiry. These controls reduce model authority. They do not make model output trustworthy. Trust is conferred only by deterministic qualification plus admission.
 
 ## Supply-chain pins
 
-Production templates pin third-party GitHub Actions to immutable commit SHAs.
+Production templates pin third-party GitHub Actions to immutable commit SHAs. All self-references to Samwise-x/opencode-actions are rendered from the single immutable `release.json.runtime_sha`, eliminating independent hand-maintained runtime pins.
 
 OpenCode is downloaded from a fixed release asset and SHA-256 verified before execution.
 
@@ -54,7 +54,7 @@ Candidate validation is intentionally isolated from provider/admission secrets. 
 
 ## Protected policy
 
-The default protected-path file prevents autonomous workers from changing their own workflow, admission, Nix/Dagger, OpenCode, scanner, architecture, and ADR control plane.
+The default protected-path file prevents autonomous workers from changing the entire GitHub workflow tree plus their admission, Nix/Dagger, OpenCode, scanner, architecture, and ADR control plane.
 
 Repository-specific control files should be added before production.
 
@@ -68,4 +68,8 @@ A worker identity with the same bypass destroys the security model.
 
 Worker evidence is diagnostic and attributable but not sufficient for admission.
 
-Qualification is a separate document produced only after exact-SHA deterministic/security jobs succeed and is signed through GitHub OIDC with Cosign. Admission verifies the expected workflow identity and OIDC issuer before using it.
+Qualification is a separate document produced only after exact-SHA deterministic/security jobs succeed and is signed through GitHub OIDC with Cosign. It records the originating validation run and workflow reference. Admission verifies the expected signing workflow identity and OIDC issuer, then independently resolves that exact validation run and its required jobs before using the qualification.
+
+## Self-healing boundary
+
+Release drift detection is deterministic and intentionally weaker than canonical authority. It may prepare a `release.json` promotion commit and open/update a PR with narrowly scoped job credentials. It cannot merge that PR, bypass admission, or reinterpret failed validation as success. Bootstrap similarly self-heals known generated predecessor bytes but refuses unknown drift rather than overwriting human-owned state.

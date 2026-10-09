@@ -1,0 +1,44 @@
+name: Authorize OpenCode candidate
+description: Classify a PR candidate and bind autonomous authorization to GitHub's native Issue linkage plus ready-for-agent state.
+
+inputs:
+  pr-number:
+    required: true
+  candidate-sha:
+    required: true
+  base:
+    required: true
+  token:
+    required: true
+
+outputs:
+  agent-candidate:
+    value: ${{ steps.context.outputs.agent_candidate }}
+  authorized:
+    value: ${{ steps.context.outputs.authorized }}
+  reason:
+    value: ${{ steps.context.outputs.reason }}
+  attempt-id:
+    value: ${{ steps.context.outputs.attempt_id }}
+  issue-number:
+    value: ${{ steps.context.outputs.issue_number }}
+
+runs:
+  using: composite
+  steps:
+    - id: context
+      name: Resolve candidate authorization
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        BASE_BRANCH: ${{ inputs.base }}
+      run: |
+        set -euo pipefail
+        /usr/bin/python3 "$GITHUB_ACTION_PATH/../scripts/candidate-context.py" \
+          --repository "$GITHUB_REPOSITORY" \
+          --pr "$PR_NUMBER" \
+          --candidate-sha "$CANDIDATE_SHA" \
+          --base "$BASE_BRANCH" \
+          --github-output "$GITHUB_OUTPUT"

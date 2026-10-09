@@ -9,12 +9,18 @@ LEASE_SECONDS="${LEASE_SECONDS:-900}"
 REQUIRED_CHECKS="${TRAJECTORY_REQUIRED_CHECKS:-deterministic,security}"
 STATE_FILE="trajectory.json"
 TMP_PARENT="${RUNNER_TEMP:-/tmp}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCHEMA="$SCRIPT_DIR/../schemas/trajectory-v2.schema.json"
 mkdir -p "$TMP_PARENT"
 ROOT="$(mktemp -d "$TMP_PARENT/opencode-trajectory.XXXXXX")"
 trap 'rm -rf "$ROOT"' EXIT
 REPO="$ROOT/repo"
 
 gitx() { /usr/bin/git -C "$REPO" "$@"; }
+
+validate_state() {
+  /usr/bin/python3 "$SCRIPT_DIR/schema-check.py" "$SCHEMA" "$1"
+}
 
 auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | /usr/bin/base64 -w0)"
 remote="${TRAJECTORY_REMOTE_URL:-${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git}"
@@ -35,10 +41,13 @@ fetch_branch() {
 }
 
 init_branch() {
-  local current json blob tree commit
+  local current json blob tree commit init_json
   current="$(remote_sha)"
   [[ -n "$current" ]] && { printf '%s\n' "$current"; return 0; }
   json='{"schema":2,"version":0,"status":"idle","lease":null,"last_attempt":null,"last_base":null,"last_candidate":null,"last_evidence":null,"last_issue":null,"last_pr":null}'
+  init_json="$ROOT/trajectory-init.json"
+  printf '%s\n' "$json" > "$init_json"
+  validate_state "$init_json"
   blob="$(printf '%s\n' "$json" | gitx hash-object -w --stdin)"
   tree="$(printf '100644 blob %s\t%s\n' "$blob" "$STATE_FILE" | gitx mktree)"
   commit="$(printf '%s\n' 'chore(trajectory): initialize' | gitx commit-tree "$tree")"
@@ -52,14 +61,17 @@ checkout_state() {
   local sha="$1"
   fetch_branch
   gitx checkout -q --detach "$sha"
+  validate_state "$REPO/$STATE_FILE"
 }
 
 commit_and_cas() {
   local expected="$1" message="$2" next
+  validate_state "$REPO/$STATE_FILE"
   gitx add "$STATE_FILE"
   gitx commit -qm "$message" --no-verify
   next="$(gitx rev-parse HEAD)"
-  gitx "${GIT_AUTH[@]}" push -q origin "$next:refs/heads/$BRANCH"     --force-with-lease="refs/heads/$BRANCH:$expected"
+  gitx "${GIT_AUTH[@]}" push -q origin "$next:refs/heads/$BRANCH" \
+    --force-with-lease="refs/heads/$BRANCH:$expected"
   printf '%s\n' "$next"
 }
 
@@ -102,7 +114,9 @@ case "${1:-}" in
     now="$(date +%s)"
     active="$(/usr/bin/jq -r --argjson now "$now" '.status=="leased" and (.lease.expires_epoch // 0)>$now' "$REPO/$STATE_FILE")"
     if [[ "$active" == "true" ]]; then
-      /usr/bin/jq -n --arg attempt "$(/usr/bin/jq -r '.lease.attempt' "$REPO/$STATE_FILE")"         --argjson expires "$(/usr/bin/jq -r '.lease.expires_epoch' "$REPO/$STATE_FILE")"         '{acquired:false,reason:"lease_active",active_attempt:$attempt,expires_epoch:$expires}'
+      /usr/bin/jq -n --arg attempt "$(/usr/bin/jq -r '.lease.attempt' "$REPO/$STATE_FILE")" \
+        --argjson expires "$(/usr/bin/jq -r '.lease.expires_epoch' "$REPO/$STATE_FILE")" \
+        '{acquired:false,reason:"lease_active",active_attempt:$attempt,expires_epoch:$expires}'
       exit 0
     fi
 
@@ -130,10 +144,33 @@ case "${1:-}" in
     lease="$(printf '%s:%s:%s' "$attempt_id" "$base_sha" "$expected" | /usr/bin/sha256sum | cut -d' ' -f1)"
     version="$(/usr/bin/jq -r '.version // 0' "$REPO/$STATE_FILE")"
     expires="$((now + LEASE_SECONDS))"
-    /usr/bin/jq --arg lease "$lease" --arg attempt "$attempt_id" --arg base "$base_sha"       --arg run "${GITHUB_RUN_ID:-local}" --argjson version "$((version+1))" --argjson expires "$expires"       '.version=$version | .status="leased" | .lease={token:$lease,attempt:$attempt,base_sha:$base,run_id:$run,expires_epoch:$expires} | .last_attempt=$attempt'       "$REPO/$STATE_FILE" > "$REPO/$STATE_FILE.tmp"
+    /usr/bin/jq --arg lease "$lease" --arg attempt "$attempt_id" --arg base "$base_sha" \
+      --arg run "${GITHUB_RUN_ID:-local}" --argjson version "$((version+1))" --argjson expires "$expires" \
+      '.version=$version | .status="leased" | .lease={token:$lease,attempt:$attempt,base_sha:$base,run_id:$run,expires_epoch:$expires} | .last_attempt=$attempt' \
+      "$REPO/$STATE_FILE" > "$REPO/$STATE_FILE.tmp"
     mv "$REPO/$STATE_FILE.tmp" "$REPO/$STATE_FILE"
     next="$(commit_and_cas "$expected" "chore(trajectory): acquire $attempt_id")"
-    /usr/bin/jq -n --arg token "$lease" --arg trajectory "$next" --arg branch "$BRANCH"       '{acquired:true,reason:"acquired",lease_token:$token,trajectory_sha:$trajectory,branch:$branch}'
+    /usr/bin/jq -n --arg token "$lease" --arg trajectory "$next" --arg branch "$BRANCH" \
+      '{acquired:true,reason:"acquired",lease_token:$token,trajectory_sha:$trajectory,branch:$branch}'
+    ;;
+
+  assert-lease)
+    expected="${2:?trajectory sha required}"; lease="${3:?lease token required}"
+    base="${4:?base sha required}"; attempt="${5:?attempt id required}"
+    current="$(remote_sha)"
+    [[ "$current" == "$expected" ]] || { echo "stale trajectory before publication: expected $expected current $current" >&2; exit 42; }
+    checkout_state "$current"
+    now="$(date +%s)"
+    status="$(/usr/bin/jq -r '.status' "$REPO/$STATE_FILE")"
+    actual="$(/usr/bin/jq -r '.lease.token // empty' "$REPO/$STATE_FILE")"
+    lease_base="$(/usr/bin/jq -r '.lease.base_sha // empty' "$REPO/$STATE_FILE")"
+    lease_attempt="$(/usr/bin/jq -r '.lease.attempt // empty' "$REPO/$STATE_FILE")"
+    expires="$(/usr/bin/jq -r '.lease.expires_epoch // 0' "$REPO/$STATE_FILE")"
+    [[ "$status" == "leased" ]] || { echo "trajectory is not leased at publication" >&2; exit 44; }
+    [[ "$actual" == "$lease" ]] || { echo "lease token changed before publication" >&2; exit 45; }
+    [[ "$lease_base" == "$base" ]] || { echo "lease base changed before publication" >&2; exit 46; }
+    [[ "$lease_attempt" == "$attempt" ]] || { echo "lease attempt changed before publication" >&2; exit 47; }
+    (( expires > now )) || { echo "lease expired before publication" >&2; exit 48; }
     ;;
 
   finalize)
@@ -145,13 +182,16 @@ case "${1:-}" in
     actual="$(/usr/bin/jq -r '.lease.token // empty' "$REPO/$STATE_FILE")"
     [[ "$actual" == "$lease" ]] || { echo "lease mismatch" >&2; exit 43; }
     lease_base="$(/usr/bin/jq -r '.lease.base_sha // empty' "$REPO/$STATE_FILE")"
-    /usr/bin/jq --arg status "$status" --arg candidate "$candidate" --arg evidence "$evidence"       --arg base "$lease_base" --arg issue "$issue" --arg pr "$pr"       '.status=$status
+    /usr/bin/jq --arg status "$status" --arg candidate "$candidate" --arg evidence "$evidence" \
+      --arg base "$lease_base" --arg issue "$issue" --arg pr "$pr" \
+      '.status=$status
        | .last_base=(if $candidate=="" then .last_base else $base end)
        | .last_candidate=(if $candidate=="" then .last_candidate else $candidate end)
        | .last_evidence=(if $evidence=="" then .last_evidence else $evidence end)
        | .last_issue=(if $issue=="" then .last_issue else ($issue|tonumber) end)
        | .last_pr=(if $pr=="" then .last_pr else ($pr|tonumber) end)
-       | .lease=null'       "$REPO/$STATE_FILE" > "$REPO/$STATE_FILE.tmp"
+       | .lease=null' \
+      "$REPO/$STATE_FILE" > "$REPO/$STATE_FILE.tmp"
     mv "$REPO/$STATE_FILE.tmp" "$REPO/$STATE_FILE"
     commit_and_cas "$current" "chore(trajectory): finalize $status" >/dev/null
     ;;
@@ -161,7 +201,7 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "usage: $0 acquire BASE_SHA ATTEMPT_ID | finalize TRAJECTORY_SHA LEASE STATUS [CANDIDATE] [EVIDENCE] [ISSUE] [PR] | read" >&2
+    echo "usage: $0 acquire BASE_SHA ATTEMPT_ID | assert-lease TRAJECTORY_SHA LEASE BASE_SHA ATTEMPT_ID | finalize TRAJECTORY_SHA LEASE STATUS [CANDIDATE] [EVIDENCE] [ISSUE] [PR] | read" >&2
     exit 2
     ;;
 esac

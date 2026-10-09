@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: CargoWall
@@ -34,24 +35,22 @@ jobs:
           set -euo pipefail
           for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
           python3 -m py_compile scripts/*.py tests/*.py
+          node --check tests/test-runtime-guard.mjs
           for f in schemas/*.json opencode.json; do jq empty "$f"; done
           ruby -e '
             require "yaml"
-            files = Dir["*.yml"] + Dir["admit/*.yml"] + Dir["seal/*.yml"] + Dir["templates/*.yml"] + Dir[".github/workflows/*.yml"]
+            files = Dir["*.yml"] + Dir["admit/*.yml"] + Dir["authorize/*.yml"] + Dir["seal/*.yml"] + Dir["templates/*.yml"] + Dir[".github/workflows/*.yml"]
             files.each { |f| YAML.load_file(f) }
           '
 
       - name: Immutable action-reference contract
         run: |
           set -euo pipefail
-          if grep -R -nE 'uses:[[:space:]]+[^ ]+@(main|master|latest|v[0-9]+([.][0-9]+)*)[[:space:]]*(#.*)?$'             action.yml admit seal templates .github/workflows; then
+          if grep -R -nE 'uses:[[:space:]]+[^ ]+@(main|master|latest|v[0-9]+([.][0-9]+)*)[[:space:]]*(#.*)?$'             action.yml admit authorize seal templates .github/workflows; then
             echo "::error::floating GitHub Action reference found"
             exit 1
           fi
-          if grep -R -n '__IMPLEMENTATION_SHA__' templates; then
-            echo "::error::handoff templates still contain unresolved implementation pin"
-            exit 1
-          fi
+          python3 scripts/release.py verify
 
       - name: Static contracts
         run: |
@@ -60,6 +59,11 @@ jobs:
           grep -q '"share": "disabled"' opencode.json
           grep -q 'force-with-lease' scripts/trajectory.sh
           grep -q 'force-with-lease' scripts/admit.py
+          grep -q '.github/workflows/\*\*' templates/protected-paths.txt
+          grep -q '".github/workflows/\*\*": "deny"' templates/opencode.json
+
+      - name: Release identity tests
+        run: python3 tests/test-release.py
 
       - name: Bootstrap convergence tests
         run: python3 tests/test-bootstrap.py
@@ -67,14 +71,29 @@ jobs:
       - name: Frontier reconstruction tests
         run: python3 tests/test-frontier.py
 
+      - name: Candidate authorization tests
+        run: python3 tests/test-candidate-context.py
+
       - name: Trajectory state-machine tests
         run: bash tests/test-trajectory.sh
+
+      - name: Publication lease tests
+        run: bash tests/test-publish.sh
 
       - name: Protected-path tests
         run: bash tests/test-protected.sh
 
+      - name: Schema contract tests
+        run: python3 tests/test-schemas.py
+
       - name: Qualification tests
         run: python3 tests/test-seal.py
+
+      - name: Admission exact-run tests
+        run: python3 tests/test-admit.py
+
+      - name: Runtime guard tests
+        run: node tests/test-runtime-guard.mjs
 
   security:
     name: security
@@ -82,6 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Trivy

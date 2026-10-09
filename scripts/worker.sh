@@ -4,6 +4,7 @@ MODEL="${MODEL:?MODEL required}"; AGENT="${AGENT:-build}"; PROMPT_FILE="${PROMPT
 SELECTION_FILE="${SELECTION_FILE:?}"; PROTECTED="${PROTECTED_PATHS_FILE:?}"; VALIDATE="${VALIDATION_COMMAND:-git diff --check}"
 ATTEMPT="${ATTEMPT_ID:?}"; BASE="${BASE_SHA:?}"; PREPARED="${PREPARED_HEAD:?}"; MERGE_CONFLICT="${MERGE_CONFLICT:-false}"
 WORKER_SECONDS="${WORKER_SECONDS:-540}"; OUT="${EVIDENCE_DIR:-.opencode-evidence}"; ROOT="${OCA_ACTION_ROOT:?}"
+SCHEMA="$ROOT/schemas/evidence-v2.schema.json"
 [[ -f "$PROMPT_FILE" && -f "$SELECTION_FILE" && -f "$PROTECTED" ]] || { echo "worker inputs missing" >&2; exit 64; }
 [[ "$(/usr/bin/git rev-parse HEAD)" == "$PREPARED" ]] || { echo "prepared HEAD moved before model" >&2; exit 67; }
 mkdir -p "$OUT"; prompt="$OUT/prompt.txt"; events="$OUT/opencode.ndjson"; stderr="$OUT/opencode.stderr"; vlog="$OUT/prepublish-validation.log"
@@ -26,7 +27,9 @@ POLICY
 baseline="$OUT/processes.before"; after="$OUT/processes.after"
 /usr/bin/ps -u "$(/usr/bin/id -u)" -o pid= | /usr/bin/awk '{$1=$1;print}' | sort -n > "$baseline"
 set +e
-env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_ACTION_PATH -u OCA_ACTION_ROOT -u RUNNER_TEMP -u EVIDENCE_DIR -u SELECTION_FILE   /usr/bin/timeout --signal=TERM --kill-after=15s "$WORKER_SECONDS"   opencode run --format json --model "$MODEL" --agent "$AGENT" "$(cat "$prompt")" >"$events" 2>"$stderr"
+env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_ACTION_PATH -u OCA_ACTION_ROOT -u RUNNER_TEMP -u EVIDENCE_DIR -u SELECTION_FILE \
+  /usr/bin/timeout --signal=TERM --kill-after=15s "$WORKER_SECONDS" \
+  opencode run --format json --model "$MODEL" --agent "$AGENT" "$(cat "$prompt")" >"$events" 2>"$stderr"
 oc_status=$?
 set -e
 /usr/bin/ps -u "$(/usr/bin/id -u)" -o pid= | /usr/bin/awk '{$1=$1;print}' | sort -n > "$after"
@@ -42,7 +45,10 @@ done
 done
 
 if [[ $oc_status -ne 0 ]]; then
-  /usr/bin/jq -n --arg attempt "$ATTEMPT" --arg base "$BASE" --arg model "$MODEL" --arg agent "$AGENT"     --arg started "$start" --arg ended "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson exit "$oc_status"     '{schema:2,kind:"agent-attempt",attempt_id:$attempt,base_sha:$base,model:$model,agent:$agent,status:"opencode_failed",opencode_exit:$exit,started_at:$started,ended_at:$ended}' > "$OUT/evidence.json"
+  /usr/bin/jq -n --arg attempt "$ATTEMPT" --arg base "$BASE" --arg model "$MODEL" --arg agent "$AGENT" \
+    --arg started "$start" --arg ended "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson exit "$oc_status" \
+    '{schema:2,kind:"agent-attempt",attempt_id:$attempt,base_sha:$base,model:$model,agent:$agent,status:"opencode_failed",opencode_exit:$exit,started_at:$started,ended_at:$ended}' > "$OUT/evidence.json"
+  /usr/bin/python3 "$ROOT/scripts/schema-check.py" "$SCHEMA" "$OUT/evidence.json"
   exit "$oc_status"
 fi
 
@@ -60,5 +66,10 @@ set -e
 sessions="$(/usr/bin/jq -r 'select(.sessionID != null) | .sessionID' "$events" 2>/dev/null | sort -u | /usr/bin/jq -R -s 'split("\n") | map(select(length>0))')"
 events_sha="$(/usr/bin/sha256sum "$events" | /usr/bin/awk '{print $1}')"; diff_sha="$(/usr/bin/sha256sum "$OUT/worktree.diff" | /usr/bin/awk '{print $1}')"
 validation_sha="$(/usr/bin/sha256sum "$vlog" | /usr/bin/awk '{print $1}')"
-/usr/bin/jq -n --arg attempt "$ATTEMPT" --arg base "$BASE" --arg model "$MODEL" --arg agent "$AGENT"   --arg started "$start" --arg ended "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg events_sha "$events_sha" --arg diff_sha "$diff_sha"   --arg validation_sha "$validation_sha" --argjson issue "$issue" --argjson sessions "$sessions" --argjson opencode_exit "$oc_status"   --argjson validation_exit "$validation_status"   '{schema:2,kind:"agent-attempt",attempt_id:$attempt,issue_number:$issue,base_sha:$base,model:$model,agent:$agent,status:(if $validation_exit==0 then "prevalidated" else "validation_failed" end),opencode_exit:$opencode_exit,validation_exit:$validation_exit,session_ids:$sessions,opencode_ndjson_sha256:$events_sha,worktree_diff_sha256:$diff_sha,validation_log_sha256:$validation_sha,started_at:$started,ended_at:$ended}' > "$OUT/evidence.json"
+/usr/bin/jq -n --arg attempt "$ATTEMPT" --arg base "$BASE" --arg model "$MODEL" --arg agent "$AGENT" \
+  --arg started "$start" --arg ended "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg events_sha "$events_sha" --arg diff_sha "$diff_sha" \
+  --arg validation_sha "$validation_sha" --argjson issue "$issue" --argjson sessions "$sessions" --argjson opencode_exit "$oc_status" \
+  --argjson validation_exit "$validation_status" \
+  '{schema:2,kind:"agent-attempt",attempt_id:$attempt,issue_number:$issue,base_sha:$base,model:$model,agent:$agent,status:(if $validation_exit==0 then "prevalidated" else "validation_failed" end),opencode_exit:$opencode_exit,validation_exit:$validation_exit,session_ids:$sessions,opencode_ndjson_sha256:$events_sha,worktree_diff_sha256:$diff_sha,validation_log_sha256:$validation_sha,started_at:$started,ended_at:$ended}' > "$OUT/evidence.json"
+/usr/bin/python3 "$ROOT/scripts/schema-check.py" "$SCHEMA" "$OUT/evidence.json"
 [[ $validation_status -eq 0 ]]

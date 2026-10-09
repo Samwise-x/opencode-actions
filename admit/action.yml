@@ -73,6 +73,7 @@ runs:
         QUALIFICATION_FILE: ${{ inputs.qualification-file }}
         PROTECTED_PATHS_FILE: ${{ inputs.protected-paths-file }}
         REQUIRED_CHECKS: ${{ inputs.required-checks }}
+        VALIDATION_WORKFLOW: ${{ inputs.validation-workflow }}
         HOME: ${{ runner.temp }}/opencode-admission-home
         GIT_CONFIG_GLOBAL: /dev/null
         GIT_CONFIG_SYSTEM: /dev/null
@@ -86,6 +87,7 @@ runs:
           --candidate-sha "$CANDIDATE_SHA"
           --qualification "$QUALIFICATION_FILE"
           --protected-paths "$PROTECTED_PATHS_FILE"
+          --validation-workflow "$VALIDATION_WORKFLOW"
         )
         IFS=',' read -r -a checks <<< "$REQUIRED_CHECKS"
         for check in "${checks[@]}"; do

@@ -67,6 +67,14 @@ jobs:
             fi
           fi
 
+          if [[ "$eligible" == "true" && -n "$run_id" && -n "$candidate" ]]; then
+            artifact_count="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq --arg name "opencode-qualified-$candidate" '[.artifacts[] | select(.name==$name and .expired==false)] | length')"
+            if [[ "$artifact_count" != "1" ]]; then
+              eligible=false
+            fi
+          fi
+
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
           echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
@@ -92,7 +100,7 @@ jobs:
 
       - name: Admit exact candidate with deterministic CAS
         if: ${{ steps.resolve.outputs.eligible == 'true' }}
-        uses: Samwise-x/opencode-actions/admit@caa4756ccd14ee820d4a0cb0b476889088ad8412
+        uses: Samwise-x/opencode-actions/admit@__IMPLEMENTATION_SHA__
         with:
           pr-number: ${{ steps.resolve.outputs.pr }}
           candidate-sha: ${{ steps.resolve.outputs.candidate }}

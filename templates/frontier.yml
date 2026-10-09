@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Run disposable frontier worker
         id: frontier
-        uses: Samwise-x/opencode-actions@caa4756ccd14ee820d4a0cb0b476889088ad8412
+        uses: Samwise-x/opencode-actions@__IMPLEMENTATION_SHA__
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:

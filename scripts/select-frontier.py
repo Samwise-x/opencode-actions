@@ -11,6 +11,12 @@ def gh(*args: str):
 def when(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
+def label_names(item: dict) -> set[str]:
+    return {str(x.get("name", "")).lower() for x in item.get("labels", [])}
+
+def ready(item: dict) -> bool:
+    return item.get("state") == "OPEN" and "ready-for-agent" in label_names(item)
+
 def rank(labels: list[dict]) -> int:
     names = {str(x.get("name", "")).lower() for x in labels}
     order = {"priority:p0":0,"priority:critical":0,"priority:p1":1,"priority:high":1,
@@ -59,7 +65,8 @@ def main() -> int:
 
     if a.issue:
         n=int(a.issue); i=issue(n)
-        if i["state"]!="OPEN": raise SystemExit(f"explicit issue #{n} is not open")
+        if not ready(i):
+            raise SystemExit(f"explicit issue #{n} is not authorized by ready-for-agent")
         linked=[item for item in prs if n in linked_issue_numbers(item)]
         if linked:
             item=min(linked,key=lambda x:(when(x["createdAt"]),int(x["number"])))
@@ -74,7 +81,7 @@ def main() -> int:
     for item in prs:
         for n in linked_issue_numbers(item):
             i=issue(n)
-            if i["state"]=="OPEN":
+            if ready(i):
                 active.append((when(item["createdAt"]),int(item["number"]),n,i,pr(item["number"])))
     if active:
         _,_,_,i,pull=min(active,key=lambda x:(x[0],x[1],x[2]))
@@ -85,6 +92,8 @@ def main() -> int:
     if not issues: emit(out,gh_out,{"status":"idle"}); return 0
     issues.sort(key=lambda x:(rank(x.get("labels",[])),when(x["createdAt"]),int(x["number"])))
     i=issue(int(issues[0]["number"]))
+    if not ready(i):
+        raise SystemExit(f"ready-for-agent listing returned unauthorized issue #{i['number']}")
     emit(out,gh_out,{"status":"work","issue":i,"branch":f"{a.branch_prefix}{i['number']}","pr":None}); return 0
 
 if __name__=="__main__": raise SystemExit(main())

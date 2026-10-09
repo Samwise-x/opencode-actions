@@ -9,6 +9,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from release import (
+    accepted_previous_blobs,
+    desired_managed_bytes,
+    git_blob_oid,
+    load_release,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 RULESET = "opencode-canonical-admission"
 
@@ -20,14 +27,6 @@ TRIAGE_LABELS = {
     "wontfix": "Will not be actioned",
 }
 
-MANAGED = {
-    "templates/frontier.yml": ".github/workflows/opencode-frontier.yml",
-    "templates/candidate-validation.yml": ".github/workflows/opencode-candidate-validation.yml",
-    "templates/admit.yml": ".github/workflows/opencode-admit.yml",
-    "templates/frontier.md": ".github/opencode/frontier.md",
-    "templates/harden-runtime.js": ".opencode/plugins/harden-runtime.js",
-}
-
 AGENT_DOCS = (
     "docs/agents/issue-tracker.md",
     "docs/agents/triage-labels.md",
@@ -37,7 +36,7 @@ AGENT_DOCS = (
 
 REQUIRED_OPENCODE_EDIT_DENIES = (
     ".git/**",
-    ".github/workflows/opencode-*.yml",
+    ".github/workflows/**",
     ".github/opencode/**",
     ".opencode-actions/**",
     ".opencode/plugins/**",
@@ -81,12 +80,15 @@ DAGGER_JSON = """{
 
 DAGGER_GO = """package main
 
+import "errors"
+
 type Validation struct{}
 
-// Validate is the minimum greenfield validation seam.
-// Replace its implementation as real repository checks appear.
-func (m *Validation) Validate() string {
-	return "ok"
+// opencode-actions: validation-required
+// A blank repository has no honest behavior contract to infer. Replace this
+// fail-closed seam with the repository's real deterministic validation graph.
+func (m *Validation) Validate() error {
+	return errors.New("repository validation contract is not configured")
 }
 """
 
@@ -143,13 +145,21 @@ def write_missing(target, relative, content, changed):
     changed.append(relative)
 
 
-def install_exact(target, source_rel, target_rel, changed):
-    source = ROOT / source_rel
+def install_managed(target, target_rel, changed):
     destination = target / target_rel
-    desired = source.read_bytes()
+    desired = desired_managed_bytes(target_rel)
     if destination.exists():
-        if destination.read_bytes() != desired:
-            raise Error(f"managed path differs; refusing overwrite: {target_rel}")
+        existing = destination.read_bytes()
+        if existing == desired:
+            return
+        current_blob = git_blob_oid(existing)
+        if current_blob not in accepted_previous_blobs(target_rel):
+            raise Error(
+                f"managed path has unknown drift; refusing overwrite: {target_rel} "
+                f"(blob {current_blob})"
+            )
+        destination.write_bytes(desired)
+        changed.append(target_rel)
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(desired)
@@ -187,7 +197,8 @@ def install_opencode(target, changed):
         raise Error("opencode.jsonc is present; refusing ambiguous OpenCode configuration")
 
     if not path.exists():
-        install_exact(target, "templates/opencode.json", "opencode.json", changed)
+        path.write_bytes((ROOT / "templates/opencode.json").read_bytes())
+        changed.append("opencode.json")
         return
 
     config = load_json(path)
@@ -202,16 +213,17 @@ def install_opencode(target, changed):
 
     missing = [pattern for pattern in REQUIRED_OPENCODE_EDIT_DENIES if edit.get(pattern) != "deny"]
     if missing:
-        raise Error(
-            "existing opencode.json is missing required edit denies: "
-            + ", ".join(missing)
-        )
+        for pattern in missing:
+            edit[pattern] = "deny"
+        path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        changed.append("opencode.json")
 
 
 def install_local(target):
     changed = []
-    for source, destination in MANAGED.items():
-        install_exact(target, source, destination, changed)
+    release = load_release()
+    for destination in sorted(release["managed"]):
+        install_managed(target, destination, changed)
     install_protected_paths(target, changed)
     install_opencode(target, changed)
 
@@ -398,6 +410,12 @@ def configure_github(target, state):
 
 
 def validate_external(target):
+    generated = target / "dagger/main.go"
+    if generated.is_file() and "opencode-actions: validation-required" in generated.read_text(encoding="utf-8"):
+        raise Error(
+            "repository validation contract required: replace the generated fail-closed "
+            "dagger Validate implementation, then rerun make"
+        )
     require("nix")
     changed = []
     if not (target / "flake.lock").exists():
