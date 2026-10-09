@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: CargoWall
@@ -34,6 +35,7 @@ jobs:
           set -euo pipefail
           for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
           python3 -m py_compile scripts/*.py tests/*.py
+          node --check tests/test-runtime-guard.mjs
           for f in schemas/*.json opencode.json; do jq empty "$f"; done
           ruby -e '
             require "yaml"
@@ -44,7 +46,7 @@ jobs:
       - name: Immutable action-reference contract
         run: |
           set -euo pipefail
-          if grep -R -nE 'uses:[[:space:]]+[^ ]+@(main|master|latest|v[0-9]+([.][0-9]+)*)[[:space:]]*(#.*)?
+          if grep -R -nE 'uses:[[:space:]]+[^ ]+@(main|master|latest|v[0-9]+([.][0-9]+)*)[[:space:]]*(#.*)?$'             action.yml admit authorize seal templates .github/workflows; then
             echo "::error::floating GitHub Action reference found"
             exit 1
           fi
@@ -57,6 +59,8 @@ jobs:
           grep -q '"share": "disabled"' opencode.json
           grep -q 'force-with-lease' scripts/trajectory.sh
           grep -q 'force-with-lease' scripts/admit.py
+          grep -q '.github/workflows/\*\*' templates/protected-paths.txt
+          grep -q '".github/workflows/\*\*": "deny"' templates/opencode.json
 
       - name: Release identity tests
         run: python3 tests/test-release.py
@@ -97,66 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-
-      - name: Trivy
-        uses: aquasecurity/trivy-action@c03d123cb480c08c69b054af418ea5e69fe6e57e
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,secret,misconfig
-          exit-code: "1"
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          version: v0.75.0
-
-      - name: Zizmor
-        uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
-        with:
-          advanced-security: false
-          annotations: true
-          persona: auditor
-          online-audits: false
-          min-severity: medium
-          version: v1.21.0
-             action.yml admit authorize seal templates .github/workflows; then
-            echo "::error::floating GitHub Action reference found"
-            exit 1
-          fi
-          if grep -R -n '__IMPLEMENTATION_SHA__' templates; then
-            echo "::error::handoff templates still contain unresolved implementation pin"
-            exit 1
-          fi
-
-      - name: Static contracts
-        run: |
-          set -euo pipefail
-          git diff --check
-          grep -q '"share": "disabled"' opencode.json
-          grep -q 'force-with-lease' scripts/trajectory.sh
-          grep -q 'force-with-lease' scripts/admit.py
-
-      - name: Bootstrap convergence tests
-        run: python3 tests/test-bootstrap.py
-
-      - name: Frontier reconstruction tests
-        run: python3 tests/test-frontier.py
-
-      - name: Trajectory state-machine tests
-        run: bash tests/test-trajectory.sh
-
-      - name: Protected-path tests
-        run: bash tests/test-protected.sh
-
-      - name: Qualification tests
-        run: python3 tests/test-seal.py
-
-  security:
-    name: security
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Trivy
