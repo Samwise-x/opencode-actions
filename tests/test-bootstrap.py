@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_DENIES = (
     ".git/**",
-    ".github/workflows/opencode-*.yml",
+    ".github/workflows/**",
     ".github/opencode/**",
     ".opencode-actions/**",
     ".opencode/plugins/**",
@@ -227,6 +227,22 @@ with tempfile.TemporaryDirectory() as td:
     green_state = base / "green-gh"
     green_env = env_for(fake_bin, green_state)
 
+    first_attempt = run_make(green, green_env, check=False)
+    assert first_attempt.returncode != 0
+    assert "repository validation contract required" in first_attempt.stderr
+    assert "opencode-actions: validation-required" in (
+        green / "dagger/main.go"
+    ).read_text(encoding="utf-8")
+
+    # Bootstrap may create the seam, but it may not invent what product
+    # behavior means. Supplying a real validation graph is the only manual
+    # greenfield boundary.
+    (green / "dagger/main.go").write_text(
+        "package main\n\ntype Validation struct{}\n\n"
+        "func (m *Validation) Validate() string { return \"validated\" }\n",
+        encoding="utf-8",
+    )
+
     first_run = run_make(green, green_env)
     assert "bootstrap: changed" in first_run.stdout
     first_files = snapshot(green)
@@ -284,6 +300,30 @@ with tempfile.TemporaryDirectory() as td:
         "actor_type": "Integration",
         "bypass_mode": "always",
     }]
+
+    # A byte-for-byte previously generated managed workflow is upgraded
+    # automatically. Unknown drift still fails closed below.
+    legacy = subprocess.run(
+        [
+            "git", "show",
+            "cc756af107155d4dc861e4a660674765de4b16ca:templates/frontier.yml",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    ).stdout
+    frontier_path = green / ".github/workflows/opencode-frontier.yml"
+    frontier_path.write_text(legacy, encoding="utf-8")
+    upgrade_run = run_make(green, green_env)
+    assert "bootstrap: changed" in upgrade_run.stdout
+    assert frontier_path.read_bytes() != legacy.encode()
+    upgraded_files = snapshot(green)
+    upgraded_github = snapshot(green_state)
+    converge_after_upgrade = run_make(green, green_env)
+    assert "bootstrap: converged (no changes)" in converge_after_upgrade.stdout
+    assert snapshot(green) == upgraded_files
+    assert snapshot(green_state) == upgraded_github
 
     brown = base / "brown"
     brown.mkdir()
