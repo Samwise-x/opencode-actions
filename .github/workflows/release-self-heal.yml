@@ -8,8 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: opencode-release-self-heal
@@ -17,6 +16,9 @@ concurrency:
 
 jobs:
   promote:
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout canonical history
