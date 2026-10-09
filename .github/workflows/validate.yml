@@ -119,7 +119,7 @@ jobs:
         uses: zizmorcore/zizmor-action@a91218c45134530ecc7aefc3eec3f997a279ad37
         with:
           advanced-security: false
-          annotations: true
+          annotations: false
           persona: auditor
           online-audits: false
           min-severity: medium
