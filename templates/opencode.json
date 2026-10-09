@@ -11,7 +11,7 @@
     "edit": {
       "*": "allow",
       ".git/**": "deny",
-      ".github/workflows/opencode-*.yml": "deny",
+      ".github/workflows/**": "deny",
       ".opencode-actions/**": "deny",
       ".opencode/plugins/**": "deny",
       "opencode.json": "deny",
