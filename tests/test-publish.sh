@@ -49,6 +49,8 @@ candidate1="$(env \
   LEASE_TOKEN="$token1" \
   bash "$ROOT/scripts/publish.sh")"
 remote1="$(/usr/bin/git --git-dir="$remote" rev-parse refs/heads/opencode/issue-1)"
+echo "candidate1=$candidate1"
+echo "remote1=$remote1"
 test "$remote1" = "$candidate1"
 
 GH_TOKEN=test GITHUB_REPOSITORY=test/test TRAJECTORY_REMOTE_URL="$remote" RUNNER_TEMP="$T/runner/finalize1" \
