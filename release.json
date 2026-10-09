@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "version": "1.1.0",
-  "runtime_sha": "3b52b488c7deda78ed01d3d47ed645b906a150ce",
+  "runtime_sha": "ff34b3354ec519645fb499c15c6dfe064465e559",
   "managed": {
     ".github/opencode/frontier.md": {
       "source": "templates/frontier.md",
