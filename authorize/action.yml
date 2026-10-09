@@ -31,11 +31,14 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        BASE_BRANCH: ${{ inputs.base }}
       run: |
         set -euo pipefail
         /usr/bin/python3 "$GITHUB_ACTION_PATH/../scripts/candidate-context.py" \
           --repository "$GITHUB_REPOSITORY" \
-          --pr "${{ inputs.pr-number }}" \
-          --candidate-sha "${{ inputs.candidate-sha }}" \
-          --base "${{ inputs.base }}" \
+          --pr "$PR_NUMBER" \
+          --candidate-sha "$CANDIDATE_SHA" \
+          --base "$BASE_BRANCH" \
           --github-output "$GITHUB_OUTPUT"
