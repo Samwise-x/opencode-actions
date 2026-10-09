@@ -1,0 +1,73 @@
+name: release-self-heal
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: opencode-release-self-heal
+  cancel-in-progress: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout canonical history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: status
+        name: Detect runtime drift from released identity
+        run: |
+          set -euo pipefail
+          python3 scripts/release.py status --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+
+      - name: Build bounded release repair
+        if: ${{ steps.status.outputs.drift == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release.py promote --runtime-sha "$GITHUB_SHA"
+          python3 scripts/release.py verify
+
+      - name: Publish release promotion candidate
+        if: ${{ steps.status.outputs.drift == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="automation/release-promotion"
+          git config user.name "opencode-actions[bot]"
+          git config user.email "opencode-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add release.json
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(release): promote validated runtime $GITHUB_SHA"
+
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            ls-remote --heads origin "refs/heads/$branch" | awk '{print $1}')"
+          if [[ -n "$remote_head" ]]; then
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+              push origin --force-with-lease="refs/heads/$branch:$remote_head" "HEAD:refs/heads/$branch"
+          else
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+              push origin "HEAD:refs/heads/$branch"
+          fi
+
+          pr="$(gh pr list --state open --head "$branch" --base main --json number --jq '.[0].number // empty')"
+          if [[ -z "$pr" ]]; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(release): promote validated OpenCode runtime" \
+              --body "Deterministic self-healing release promotion. Updates only release identity/provenance after runtime-bearing files changed on canonical main. This PR is intentionally not auto-merged."
+          fi
