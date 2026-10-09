@@ -74,4 +74,27 @@ doc=run([canonical],[],{8:issue8},{8:pr_doc(8,"opencode/issue-8")})
 assert doc["issue"]["number"]==8
 assert doc["branch"]=="opencode/issue-8"
 
+issue9=issue_doc(9,"paused")
+issue9["labels"]=[{"name":"ready-for-human"}]
+paused={
+    "number":9,
+    "headRefName":"implementation/paused",
+    "createdAt":"2026-10-08T01:00:00Z",
+    "closingIssuesReferences":[{"number":9,"url":issue9["url"]}],
+}
+doc=run(
+    [paused],
+    [{"number":7,"title":"fresh","url":issue7["url"],"createdAt":"2026-10-08T06:15:14Z","labels":[{"name":"ready-for-agent"}]}],
+    {9:issue9,7:issue7},
+    {9:pr_doc(9,"implementation/paused")},
+)
+assert doc["issue"]["number"]==7
+
+try:
+    run([paused],[],{9:issue9},{9:pr_doc(9,"implementation/paused")},"9")
+except SystemExit as exc:
+    assert "ready-for-agent" in str(exc)
+else:
+    raise AssertionError("explicit unready issue was unexpectedly authorized")
+
 print("frontier reconstruction tests passed")
