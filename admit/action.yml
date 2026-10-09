@@ -86,6 +86,7 @@ runs:
           --candidate-sha "$CANDIDATE_SHA"
           --qualification "$QUALIFICATION_FILE"
           --protected-paths "$PROTECTED_PATHS_FILE"
+          --validation-workflow "${{ inputs.validation-workflow }}"
         )
         IFS=',' read -r -a checks <<< "$REQUIRED_CHECKS"
         for check in "${checks[@]}"; do
