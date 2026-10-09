@@ -5,12 +5,13 @@ set -euo pipefail
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY required}"
 ATTEMPT="${ATTEMPT_ID:?}"; BASE="${BASE_SHA:?}"; ISSUE="${ISSUE_NUMBER:?}"; BRANCH="${CANDIDATE_BRANCH:?}"
 EXPECTED="${EXPECTED_REMOTE_HEAD:-}"; OUT="${EVIDENCE_DIR:-.opencode-evidence}"; ROOT="${OCA_ACTION_ROOT:?}"
+TRAJECTORY_SHA="${TRAJECTORY_SHA:?}"; LEASE_TOKEN="${LEASE_TOKEN:?}"
 SOURCE="$GITHUB_WORKSPACE"
 TARGET="$(mktemp -d "${RUNNER_TEMP:-/tmp}/opencode-publish.XXXXXX")"
 trap 'rm -rf "$TARGET"' EXIT
 
 auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | /usr/bin/base64 -w0)"
-remote="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git"
+remote="${PUBLISH_REMOTE_URL:-${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git}"
 GIT_AUTH=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" -c core.hooksPath=/dev/null)
 
 /usr/bin/git init -q "$TARGET"
@@ -31,7 +32,10 @@ else
   /usr/bin/git -C "$TARGET" checkout -q --detach "$BASE"
 fi
 
-/usr/bin/rsync -a --delete   --exclude='.git'   --exclude='.opencode-evidence'   "$SOURCE/" "$TARGET/"
+/usr/bin/rsync -a --delete \
+  --exclude='.git' \
+  --exclude='.opencode-evidence' \
+  "$SOURCE/" "$TARGET/"
 
 cd "$TARGET"
 /usr/bin/git add -A
@@ -40,24 +44,42 @@ if /usr/bin/git diff --name-only --diff-filter=U | /usr/bin/grep -q .; then
   exit 74
 fi
 
-/usr/bin/python3 "$ROOT/scripts/check-protected.py"   --rules "$SOURCE/$PROTECTED_PATHS_FILE"   --base "$BASE"   --head WORKTREE
+/usr/bin/python3 "$ROOT/scripts/check-protected.py" \
+  --rules "$SOURCE/$PROTECTED_PATHS_FILE" \
+  --base "$BASE" \
+  --head WORKTREE
 
 if ! /usr/bin/git diff --cached --quiet || /usr/bin/git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-  /usr/bin/git commit --no-verify     -m "agent: advance issue #$ISSUE"     -m "OpenCode-Attempt: $ATTEMPT"     -m "OpenCode-Issue: #$ISSUE"
+  /usr/bin/git commit --no-verify \
+    -m "agent: advance issue #$ISSUE" \
+    -m "OpenCode-Attempt: $ATTEMPT" \
+    -m "OpenCode-Issue: #$ISSUE"
 fi
 candidate="$(/usr/bin/git rev-parse HEAD)"
 /usr/bin/git merge-base --is-ancestor "$BASE" "$candidate" || { echo "candidate is not descended from canonical base" >&2; exit 75; }
 
 if [[ "$candidate" != "$BASE" ]]; then
+  # The trajectory lease is the single-writer authority. Revalidate it at the
+  # mutation boundary rather than assuming the lease acquired minutes earlier
+  # is still live.
+  TRAJECTORY_REMOTE_URL="${TRAJECTORY_REMOTE_URL:-}" \
+    /usr/bin/bash "$ROOT/scripts/trajectory.sh" assert-lease \
+      "$TRAJECTORY_SHA" "$LEASE_TOKEN" "$BASE" "$ATTEMPT"
+
   if [[ -n "$EXPECTED" ]]; then
-    /usr/bin/git "${GIT_AUTH[@]}" push origin       --force-with-lease="refs/heads/$BRANCH:$EXPECTED"       "$candidate:refs/heads/$BRANCH"
+    /usr/bin/git "${GIT_AUTH[@]}" push origin \
+      --force-with-lease="refs/heads/$BRANCH:$EXPECTED" \
+      "$candidate:refs/heads/$BRANCH"
   else
     /usr/bin/git "${GIT_AUTH[@]}" push origin "$candidate:refs/heads/$BRANCH"
   fi
 fi
 
 cd "$SOURCE"
-/usr/bin/jq --arg candidate "$candidate" --arg branch "$BRANCH" --argjson issue "$ISSUE"   '.candidate_sha=$candidate | .candidate_branch=$branch | .issue_number=$issue'   "$OUT/evidence.json" > "$OUT/evidence.tmp"
+/usr/bin/jq --arg candidate "$candidate" --arg branch "$BRANCH" --argjson issue "$ISSUE" \
+  '.candidate_sha=$candidate | .candidate_branch=$branch | .issue_number=$issue' \
+  "$OUT/evidence.json" > "$OUT/evidence.tmp"
 mv "$OUT/evidence.tmp" "$OUT/evidence.json"
+/usr/bin/python3 "$ROOT/scripts/schema-check.py" "$ROOT/schemas/evidence-v2.schema.json" "$OUT/evidence.json"
 /usr/bin/sha256sum "$OUT/evidence.json" | /usr/bin/awk '{print $1}' > "$OUT/evidence.sha256"
 printf '%s\n' "$candidate"
